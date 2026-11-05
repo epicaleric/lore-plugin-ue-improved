@@ -1,4 +1,4 @@
-# Lore Hub
+# Lore+
 
 A desktop app for Lore servers. See the [main README](../README.md) for what it does.
 

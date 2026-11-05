@@ -31,7 +31,31 @@ export function Updates() {
         <div className="panel">
           <div className="row between">
             <div className="row">
-              <div className="brand-mark" style={{ width: 42, height: 42 }}><Terminal size={20} /></div>
+              <div className="updates-icon"><Rocket size={20} /></div>
+              <div>
+                <h3 style={{ margin: 0 }}>Lore+</h3>
+                <div className="muted">Installed {u.app.installed ?? "?"}{u.app.latest ? ` · latest ${u.app.latest}` : ""}</div>
+              </div>
+            </div>
+            <div className="row gap-s">
+              <StatusLine c={u.app} />
+              <button className="btn small ghost" onClick={() => openUrl(u.app.url ?? "https://github.com/epicaleric/lore-plugin-ue-improved/releases")}><ExternalLink size={14} /> Releases</button>
+              <button className="btn primary small" disabled={!u.app.outdated || !u.app.asset || u.busy["app"]} onClick={u.installApp}>
+                {u.busy["app"] ? <Spinner size={14} /> : <Download size={14} />} Update and restart
+              </button>
+            </div>
+          </div>
+          <div className="row" style={{ marginTop: 14 }}>
+            <Switch on={settings.autoUpdate.app} onChange={(on) => update({ autoUpdate: { ...settings.autoUpdate, app: on } })} />
+            <span>Update automatically when the app starts</span>
+          </div>
+          <Log lines={u.logs["app"]} />
+        </div>
+
+        <div className="panel">
+          <div className="row between">
+            <div className="row">
+              <div className="updates-icon"><Terminal size={20} /></div>
               <div>
                 <h3 style={{ margin: 0 }}>Lore client</h3>
                 <div className="muted">Installed {u.lore.installed ?? "unknown"}{u.lore.latest ? ` · latest ${u.lore.latest}` : ""}</div>
@@ -56,7 +80,7 @@ export function Updates() {
         <div className="panel">
           <div className="row between">
             <div className="row">
-              <div className="brand-mark" style={{ width: 42, height: 42 }}><Package size={20} /></div>
+              <div className="updates-icon"><Package size={20} /></div>
               <div>
                 <h3 style={{ margin: 0 }}>Unreal plugin</h3>
                 <div className="muted">{u.plugin.latest ? `Latest ${u.plugin.latest}` : "Latest version unknown"}</div>
@@ -114,30 +138,6 @@ export function Updates() {
             </tbody></table>
           )}
           {locals.map((project) => <Log key={project.path} lines={u.logs[`plugin:${project.path}`]} />)}
-        </div>
-
-        <div className="panel">
-          <div className="row between">
-            <div className="row">
-              <div className="brand-mark" style={{ width: 42, height: 42 }}><Rocket size={20} /></div>
-              <div>
-                <h3 style={{ margin: 0 }}>Lore Hub</h3>
-                <div className="muted">Installed {u.app.installed ?? "?"}{u.app.latest ? ` · latest ${u.app.latest}` : ""}</div>
-              </div>
-            </div>
-            <div className="row gap-s">
-              <StatusLine c={u.app} />
-              <button className="btn small ghost" onClick={() => openUrl(u.app.url ?? "https://github.com/epicaleric/lore-plugin-ue-improved/releases")}><ExternalLink size={14} /> Releases</button>
-              <button className="btn primary small" disabled={!u.app.outdated || !u.app.asset || u.busy["app"]} onClick={u.installApp}>
-                {u.busy["app"] ? <Spinner size={14} /> : <Download size={14} />} Update and restart
-              </button>
-            </div>
-          </div>
-          <div className="row" style={{ marginTop: 14 }}>
-            <Switch on={settings.autoUpdate.app} onChange={(on) => update({ autoUpdate: { ...settings.autoUpdate, app: on } })} />
-            <span>Update automatically when the app starts</span>
-          </div>
-          <Log lines={u.logs["app"]} />
         </div>
       </div>
     </>

@@ -42,7 +42,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   const { settings, engines, locals, reloadEngines, reload, toast, ready } = useStore();
   const [lore, setLore] = useState<Component>(empty("Lore client"));
   const [plugin, setPlugin] = useState<Component>(empty("Unreal plugin"));
-  const [app, setApp] = useState<Component>(empty("Lore Hub"));
+  const [app, setApp] = useState<Component>(empty("Lore+"));
   const [checking, setChecking] = useState(false);
   const [logs, setLogs] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -105,7 +105,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
         const asset = release?.assets?.find((a: any) => /setup\.exe$/i.test(a.name));
         const latest = release ? String(release.tag_name).replace(/^desktop-v/, "") : null;
         setApp({
-          name: "Lore Hub",
+          name: "Lore+",
           installed: currentVersion,
           latest,
           url: release?.html_url ?? `${REPO_URL}/releases`,
@@ -113,7 +113,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
           outdated: !!(currentVersion && latest && compareVersions(currentVersion, latest) < 0),
         });
       } else {
-        setApp({ ...empty("Lore Hub"), installed: currentVersion, error: "Could not check GitHub" });
+        setApp({ ...empty("Lore+"), installed: currentVersion, error: "Could not check GitHub" });
       }
     } finally {
       setChecking(false);

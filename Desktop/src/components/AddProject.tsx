@@ -83,19 +83,24 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
       await invoke("write_text_file", { path: `${folder}\\.loreignore`, contents: IGNORE_TEMPLATE, overwrite: false });
       mark(0, "done");
 
+      // A folder that was prepared by an earlier attempt already is a repository: carry on from there.
       mark(1, "run");
-      let result = await api.lore(["repository", "create", `${server.loreUrl}/${serverName(name)}`], folder, server.id);
-      if (!result.ok) return fail(1, result);
+      let result: { ok: boolean; stderr: string; stdout: string } = { ok: true, stderr: "", stdout: "" };
+      if (!(await invoke<boolean>("path_exists", { path: `${folder}\\.lore` }))) {
+        result = await api.lore(["repository", "create", `${server.loreUrl}/${serverName(name)}`], folder, server.id);
+        if (!result.ok) return fail(1, result);
+      }
       mark(1, "done");
 
+      // `stage .` only takes files that are already marked as changed, so ask Lore to scan the folder.
       mark(2, "run");
-      result = await api.lore(["stage", "."], folder, server.id);
+      result = await api.lore(["stage", "--scan", "."], folder, server.id);
       if (!result.ok) return fail(2, result);
       mark(2, "done");
 
       mark(3, "run");
       result = await api.lore(["commit", "Initial version"], folder, server.id);
-      if (!result.ok) return fail(3, result);
+      if (!result.ok && !/nothing/i.test(result.stderr + result.stdout)) return fail(3, result);
       mark(3, "done");
 
       mark(4, "run");

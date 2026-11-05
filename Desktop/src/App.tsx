@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Folder } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Logo } from "./components/Logo";
 import { Sidebar } from "./components/Sidebar";
 import { ServerForm, SignInForm } from "./components/Servers";
 import { Spinner } from "./components/ui";
@@ -19,10 +19,10 @@ function Welcome() {
     <div className="welcome">
       <div className="welcome-card">
         <div className="steps"><span className="step on" /><span className={`step ${server ? "on" : ""}`} /></div>
-        <div className="brand-mark" style={{ width: 48, height: 48, borderRadius: 14 }}><Folder size={24} strokeWidth={2.4} /></div>
+        <Logo size={56} />
         {!server ? (
           <>
-            <h1>Welcome to Lore Hub</h1>
+            <h1>Welcome to Lore+</h1>
             <div className="muted" style={{ marginBottom: 22 }}>Connect to your Lore server to see all projects, sync them and manage who can use them.</div>
             <ServerForm
               onCancel={() => {}}
@@ -51,7 +51,31 @@ function Welcome() {
 }
 
 export default function App() {
-  const { ready, settings, view, toasts } = useStore();
+  const { ready, settings, view, toasts, back, forward } = useStore();
+
+  // The side buttons of a mouse (and Alt + arrows) go back and forward, like in a browser.
+  useEffect(() => {
+    const press = (event: MouseEvent) => {
+      if (event.button === 3 || event.button === 4) event.preventDefault();
+    };
+    const release = (event: MouseEvent) => {
+      if (event.button === 3) { event.preventDefault(); back(); }
+      if (event.button === 4) { event.preventDefault(); forward(); }
+    };
+    const keys = (event: KeyboardEvent) => {
+      if (!event.altKey) return;
+      if (event.key === "ArrowLeft") back();
+      if (event.key === "ArrowRight") forward();
+    };
+    window.addEventListener("mousedown", press);
+    window.addEventListener("mouseup", release);
+    window.addEventListener("keydown", keys);
+    return () => {
+      window.removeEventListener("mousedown", press);
+      window.removeEventListener("mouseup", release);
+      window.removeEventListener("keydown", keys);
+    };
+  }, [back, forward]);
   if (!ready) return <div className="welcome"><Spinner size={28} /></div>;
   if (settings.servers.length === 0) {
     return <><Welcome /><div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.text}</div>)}</div></>;

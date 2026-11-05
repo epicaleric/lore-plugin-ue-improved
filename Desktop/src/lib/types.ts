@@ -34,6 +34,8 @@ export interface ProjectOverride {
   thumbnail?: string;
 }
 
+export type SortKey = "name" | "opened" | "updated" | "revisions";
+
 export interface Settings {
   servers: Server[];
   activeServer?: string;
@@ -47,6 +49,9 @@ export interface Settings {
   hidden: string[];
   accent: string;
   view: "grid" | "list";
+  sort: SortKey;
+  /** repository id -> when the project was last opened here */
+  opened: Record<string, number>;
   autoUpdate: { lore: boolean; plugin: boolean; app: boolean };
 }
 

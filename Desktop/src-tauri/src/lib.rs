@@ -13,7 +13,14 @@ use tauri::{AppHandle, Manager};
 fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("settings.json"))
+    let target = dir.join("settings.json");
+    // The app used to be called Lore Hub (nl.ericflix.lorehub): take its settings along once.
+    if !target.exists() {
+        if let Some(old) = dir.parent().map(|p| p.join("nl.ericflix.lorehub").join("settings.json")) {
+            let _ = std::fs::copy(old, &target);
+        }
+    }
+    Ok(target)
 }
 
 #[tauri::command]
@@ -223,5 +230,5 @@ pub fn run() {
             system::delete_folder,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Lore Hub");
+        .expect("error while running Lore+");
 }

@@ -21,9 +21,11 @@ export const defaultSettings: Settings = {
   overrides: {},
   favorites: [],
   hidden: [],
-  accent: "#14a0a5",
+  accent: "#1ab6ff",
   view: "grid",
-  autoUpdate: { lore: false, plugin: false, app: false },
+  sort: "name",
+  opened: {},
+  autoUpdate: { lore: true, plugin: true, app: true },
 };
 
 interface Store {
@@ -51,6 +53,8 @@ interface Store {
   projectKey: string | null;
   category: string;
   go: (view: View, projectKey?: string | null) => void;
+  back: () => void;
+  forward: () => void;
   setCategory: (id: string) => void;
   toast: (text: string, kind?: Toast["kind"]) => void;
   toasts: Toast[];
@@ -200,7 +204,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       const saved: Partial<Settings> = await api.getSettings().catch(() => ({}));
-      const merged = { ...defaultSettings, ...saved, autoUpdate: { ...defaultSettings.autoUpdate, ...(saved.autoUpdate ?? {}) } } as Settings;
+      const merged = { ...defaultSettings, ...saved, accent: !saved.accent || saved.accent === "#14a0a5" ? defaultSettings.accent : saved.accent, autoUpdate: { ...defaultSettings.autoUpdate, ...(saved.autoUpdate ?? {}) } } as Settings;
       settingsRef.current = merged;
       setSettings(merged);
       setReady(true);
@@ -245,9 +249,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return allowed.sort((a, b) => a.name.localeCompare(b.name));
   }, [remote, locals, settings.hidden, settings.assignments, settings.categories, categories]);
 
+  // Where the user has been, so the mouse's back button works like in a browser.
+  const trail = useRef<{ view: View; projectKey: string | null; category: string }[]>([{ view: "projects", projectKey: null, category: "all" }]);
+  const at = useRef(0);
+  const categoryRef = useRef("all");
+
+  const show = (entry: { view: View; projectKey: string | null; category: string }) => {
+    categoryRef.current = entry.category;
+    setView(entry.view);
+    setProjectKey(entry.projectKey);
+    setCategory(entry.category);
+  };
+
   const go = useCallback((next: View, key?: string | null) => {
-    setView(next);
-    setProjectKey(key ?? null);
+    const entry = { view: next, projectKey: key ?? null, category: categoryRef.current };
+    const current = trail.current[at.current];
+    if (current && current.view === entry.view && current.projectKey === entry.projectKey && current.category === entry.category) return;
+    trail.current = [...trail.current.slice(0, at.current + 1), entry];
+    at.current = trail.current.length - 1;
+    setView(entry.view);
+    setProjectKey(entry.projectKey);
+  }, []);
+
+  const back = useCallback(() => {
+    if (at.current > 0) show(trail.current[--at.current]);
+  }, []);
+  const forward = useCallback(() => {
+    if (at.current < trail.current.length - 1) show(trail.current[++at.current]);
+  }, []);
+
+  const chooseCategory = useCallback((id: string) => {
+    categoryRef.current = id;
+    setCategory(id);
   }, []);
 
   const value: Store = {
@@ -273,7 +306,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     projectKey,
     category,
     go,
-    setCategory,
+    back,
+    forward,
+    setCategory: chooseCategory,
     toast,
     toasts,
   };

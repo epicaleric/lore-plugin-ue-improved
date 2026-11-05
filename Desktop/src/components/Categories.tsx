@@ -75,7 +75,7 @@ export function CategoryModal({ category, parentId, onClose }: { category?: Cate
           {settings.categories.filter((c) => !blocked.has(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </Field>
-      <Field label="Who sees this category" hint="This hides the category, and the projects in it, in Lore Hub. To really block a project, use Who has access.">
+      <Field label="Who sees this category" hint="This hides the category, and the projects in it, in Lore+. To really block a project, use Who has access.">
         <select className="select" value={limited ? "some" : "all"} onChange={(e) => setLimited(e.target.value === "some")}>
           <option value="all">Everyone</option>
           <option value="some">Only the people I choose</option>

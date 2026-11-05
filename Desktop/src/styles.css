@@ -1,24 +1,25 @@
 :root {
-  --accent: #14a0a5;
+  --accent: #1ab6ff;
   --accent-ink: #ffffff;
-  --bg: #0b0d12;
-  --panel: #11141b;
-  --card: #151922;
-  --card-hover: #1a1f2a;
-  --raised: #1d2230;
-  --border: #232938;
-  --border-soft: #1b2030;
-  --text: #e8ebf3;
-  --muted: #8c94a8;
-  --faint: #5d657a;
+  --bg: #101014;
+  --panel: #131318;
+  --card: #1a1a20;
+  --card-hover: #202028;
+  --raised: #23232c;
+  --border: #2e2e38;
+  --border-soft: #25252d;
+  --text: #f4f4f7;
+  --muted: #a3a3b0;
+  --faint: #6e6e7c;
+  --grad: linear-gradient(225deg, #a0e1ff 0%, #5fe367 100%);
   --good: #3ecf8e;
   --warn: #f0b429;
   --bad: #f0616d;
   --info: #5aa2ff;
-  --radius: 14px;
+  --radius: 16px;
   --radius-sm: 9px;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-family: Inter, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   color-scheme: dark;
 }
 
@@ -37,8 +38,9 @@ button { font: inherit; color: inherit; }
 /* ---------- sidebar ---------- */
 .sidebar { background: var(--panel); border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; padding: 18px 14px; gap: 6px; min-height: 0; }
 .brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 16px; }
-.brand-mark { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #2f64e1)); display: grid; place-items: center; color: var(--accent-ink); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent); }
-.brand-name { font-weight: 650; font-size: 16px; letter-spacing: 0.2px; }
+.brand-mark-old { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #2f64e1)); display: grid; place-items: center; color: var(--accent-ink); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent); }
+.brand-name { font-weight: 700; font-size: 18px; letter-spacing: 0.2px; }
+.brand-name .plus { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .brand-sub { font-size: 11.5px; color: var(--muted); margin-top: -1px; }
 
 .server-switch { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--border-soft); cursor: pointer; text-align: left; margin-bottom: 10px; }
@@ -64,7 +66,7 @@ button { font: inherit; color: inherit; }
 /* ---------- main ---------- */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .topbar { display: flex; align-items: center; gap: 14px; padding: 18px 28px 14px; }
-.topbar h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: 0.1px; }
+.topbar h1 { font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.2px; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
 .topbar .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .spacer { flex: 1; }
 .content { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 28px 32px; }
@@ -78,7 +80,7 @@ button { font: inherit; color: inherit; }
 .btn:hover:not(:disabled) { background: var(--card-hover); border-color: #313950; }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 650; }
 .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, white); border-color: transparent; }
 .btn.danger { color: var(--bad); }
 .btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 14%, transparent); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
@@ -222,3 +224,25 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .step { height: 4px; flex: 1; border-radius: 2px; background: var(--border); }
 .step.on { background: var(--accent); }
 .list-thumb .initials { font-size: 14px; }
+
+/* ---------- Lore website look ---------- */
+.nav-item.active { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.nav-item.drop { background: color-mix(in srgb, var(--accent) 28%, transparent); outline: 1px dashed var(--accent); outline-offset: -2px; }
+.project-card[draggable="true"]:active { cursor: grabbing; opacity: 0.85; }
+.panel { background: var(--card); }
+.modal { background: var(--panel); }
+.welcome { background: radial-gradient(1100px 600px at 20% 0%, color-mix(in srgb, #5fe367 14%, transparent), transparent 60%), radial-gradient(900px 500px at 90% 10%, color-mix(in srgb, #a0e1ff 12%, transparent), transparent 60%), var(--bg); }
+.welcome-card h1 { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+.step.on { background: var(--grad); }
+.tab.active { border-bottom-color: #5fe367; }
+.rev-num { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand .brand-sub { color: var(--faint); }
+.updates-icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--grad); color: #0b1a10; }
+
+.avatar-stack { display: inline-flex; align-items: center; }
+.avatar-stack .avatar { margin-left: -7px; border: 2px solid var(--card); box-sizing: content-box; width: 20px; height: 20px; font-size: 10px; }
+.avatar-stack .avatar:first-child { margin-left: 0; }
+.avatar-stack .avatar.more { background: var(--raised); color: var(--muted); font-weight: 600; font-size: 10px; }
+.rev-count { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.cat-tag { display: inline-flex; align-items: center; gap: 6px; height: 21px; padding: 0 9px; border-radius: 11px; background: var(--raised); border: 1px solid var(--border-soft); color: var(--muted); font-size: 11.5px; font-weight: 600; white-space: nowrap; flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+.select.sort { width: auto; height: 36px; padding: 0 10px; background: var(--card); }

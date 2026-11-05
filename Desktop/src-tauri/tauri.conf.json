@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lore Hub",
+  "productName": "Lore+",
   "version": "0.1.0",
-  "identifier": "nl.ericflix.lorehub",
+  "identifier": "nl.ericflix.loreplus",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,13 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "Lore Hub",
+        "title": "Lore+",
         "width": 1280,
         "height": 820,
         "minWidth": 980,
         "minHeight": 640,
         "center": true,
         "decorations": true,
+        "dragDropEnabled": false,
         "backgroundColor": "#0d0f14"
       }
     ],

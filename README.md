@@ -1,17 +1,17 @@
-# Lore tools for Unreal Engine
+﻿# Lore tools for Unreal Engine
 
 Two things for teams that use [Lore](https://github.com/EpicGames/lore) with Unreal Engine:
 
 | | What it is |
 | --- | --- |
-| **[Lore Hub](Desktop/)** | A desktop app: all projects on your server as cards, sync and clone, history, users and access, categories, and one-click updates of the Lore client and the plugin. |
+| **[Lore+](Desktop/)** | A desktop app: all projects on your server as cards, sync and clone, history, users and access, categories, and one-click updates of the Lore client and the plugin. |
 | **[Lore Source Control](Plugin/LoreSourceControl/)** | The Unreal Editor plugin: revision control provider plus a Lore Revision Control window with History, Changes, Locks, Server and Settings tabs, and AI-written descriptions. |
 
 They work together but neither needs the other.
 
 ![Revision Control Settings panel showing Lore selected as the provider](Media/revision-control-settings.png)
 
-## Lore Hub
+## Lore+
 
 - **Servers and sign-in** - add one or more Lore servers and sign in with your user name and password (or an API key). The password is never stored; the sign-in token goes in the Windows credential store.
 - **Projects like the Unreal project browser** - thumbnail, name and Unreal version from the project itself (both can be changed in the app), and whether you are up to date, behind, or not on this PC at all.
@@ -23,7 +23,7 @@ They work together but neither needs the other.
 - **Updates** - checks the Lore client, the Unreal plugin and the app itself, installs them, and can do so automatically. The plugin can be installed into any Unreal Engine on the PC (built with that engine's own tools) or into a single project.
 
 Users, grants and projects are managed through the admin API of
-[lore-auth-server](https://github.com/dy-sh/lore-auth-server) (`admin_api = true` in its config), so Lore Hub fits servers that use that authentication service. Everything else works through the `lore` command-line client.
+[lore-auth-server](https://github.com/dy-sh/lore-auth-server) (`admin_api = true` in its config), so Lore+ fits servers that use that authentication service. Everything else works through the `lore` command-line client.
 
 Windows only for now. Build instructions are in [Desktop/README.md](Desktop/README.md).
 

@@ -1,15 +1,18 @@
 import { useState } from "react";
-import { ChevronsUpDown, Folder, LayoutGrid, Plus, RefreshCw, Settings as SettingsIcon, ShieldCheck, Users } from "lucide-react";
+import { ChevronsUpDown, LayoutGrid, Plus, RefreshCw, Settings as SettingsIcon, ShieldCheck, Star, Users } from "lucide-react";
 import { useStore, type View } from "../lib/store";
 import { useUpdates } from "../lib/updates";
 import { readableOn } from "../lib/format";
 import { CategoryAccessModal, CategoryModal } from "./Categories";
 import { ServerModal, SignInModal } from "./Servers";
+import { Logo } from "./Logo";
 import { useMenu } from "./ui";
+import { DRAG_TYPE } from "../views/Projects";
 import type { Category } from "../lib/types";
 
 export function Sidebar() {
-  const { settings, server, session, view, go, category, setCategory, projects, isAdmin, setServer, categories, sharedActive } = useStore();
+  const { settings, update, server, session, view, go, category, setCategory, projects, isAdmin, setServer, categories, sharedActive, projectKey } = useStore();
+  const [over, setOver] = useState<string | null>(null);
   const canEdit = !sharedActive || isAdmin;
   const updates = useUpdates();
   const menu = useMenu();
@@ -29,10 +32,34 @@ export function Sidebar() {
   const countIn = (id: string) => projects.filter((p) => p.id && settings.assignments[p.id] === id).length;
   const roots = categories.filter((c) => !c.parentId);
 
+  /** Dropping a project on a category (or on "All projects" to take it out of its category). */
+  const dropTarget = (target: string | null) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!canEdit || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setOver(target ?? "all");
+    },
+    onDragLeave: () => setOver(null),
+    onDrop: (e: React.DragEvent) => {
+      const id = e.dataTransfer.getData(DRAG_TYPE);
+      setOver(null);
+      if (!id || !canEdit) return;
+      e.preventDefault();
+      const next = { ...settings.assignments };
+      if (target) next[id] = target;
+      else delete next[id];
+      update({ assignments: next });
+    },
+  });
+
+  const favorites = projects.filter((p) => p.id && settings.favorites.includes(p.id));
+
   const renderCategory = (c: Category, depth: number): React.ReactNode => (
     <div key={c.id}>
       <button
-        className={`nav-item ${category === c.id && (view === "projects" || view === "project") ? "active" : ""}`}
+        {...dropTarget(c.id)}
+        className={`nav-item ${over === c.id ? "drop" : ""} ${category === c.id && (view === "projects" || view === "project") ? "active" : ""}`}
         style={{ paddingLeft: 12 + depth * 16 }}
         onClick={() => {
           setCategory(c.id);
@@ -56,8 +83,8 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark"><Folder size={19} strokeWidth={2.4} /></div>
-        <div><div className="brand-name">Lore Hub</div><div className="brand-sub">Projects and people</div></div>
+        <Logo size={34} />
+        <div><div className="brand-name">Lore<span className="plus">+</span></div><div className="brand-sub">Projects and people</div></div>
       </div>
 
       <button
@@ -87,12 +114,22 @@ export function Sidebar() {
           {canEdit && <button className="btn icon small ghost" style={{ width: 24, height: 24 }} title="New category" onClick={() => setEditing({})}><Plus size={14} /></button>}
         </div>
         {categories.length > 0 && (
-          <button className={`nav-item ${category === "all" && view === "projects" ? "active" : ""}`} onClick={() => { setCategory("all"); go("projects"); }}>
+          <button {...dropTarget(null)} className={`nav-item ${over === "all" ? "drop" : ""} ${category === "all" && view === "projects" ? "active" : ""}`} onClick={() => { setCategory("all"); go("projects"); }}>
             <span className="cat-row"><span className="cat-dot" style={{ background: "var(--faint)" }} />All projects</span>
           </button>
         )}
         {roots.map((c) => renderCategory(c, 0))}
         {categories.length === 0 && <div className="faint" style={{ padding: "2px 12px", fontSize: 12.5 }}>Group your projects, for example by product.</div>}
+        {favorites.length > 0 && (
+          <>
+            <div className="nav-group-title"><span>Favorites</span></div>
+            {favorites.map((p) => (
+              <button key={p.key} className={`nav-item ${view === "project" && projectKey === p.key ? "active" : ""}`} onClick={() => go("project", p.key)}>
+                <span className="cat-row"><Star size={13} fill="currentColor" color="var(--warn)" />{settings.overrides[p.id!]?.displayName || p.name}</span>
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       <div className="sidebar-foot">
