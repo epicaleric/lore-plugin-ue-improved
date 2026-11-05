@@ -54,6 +54,8 @@ export interface UefnBackup {
   daily: boolean;
 }
 
+export type GroupKey = "none" | "category" | "engine";
+
 export type SortKey = "name" | "opened" | "updated" | "revisions";
 
 export interface Settings {
@@ -74,6 +76,11 @@ export interface Settings {
   mirrors: Record<string, MirrorConfig>;
   /** UEFN project id -> its backup on the server */
   uefnBackups: Record<string, UefnBackup>;
+  /** folders of the UEFN projects the person added; missing until the first scan after updating */
+  uefnAdded?: string[];
+  groupBy: GroupKey;
+  /** groups in the project list that are folded away */
+  collapsed: string[];
   /** how big the cards (grid) and the thumbnails (list) are */
   size: { grid: number; list: number };
   /** repository id -> when the project was last opened here */

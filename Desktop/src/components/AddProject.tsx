@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Check, FolderOpen, FolderSearch, UploadCloud, X } from "lucide-react";
+import { Box, Check, FolderOpen, FolderSearch, Plus, UploadCloud, X } from "lucide-react";
 import { api } from "../lib/api";
 import { squarePng, thumbnailPathOf } from "../lib/image";
 import { parseStatus } from "../lib/parse";
@@ -58,9 +58,9 @@ function progressOf(line: string): number | undefined {
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 const size = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`);
 
-export function AddProjectModal({ onClose }: { onClose: () => void }) {
-  const { server, session, settings, update, reload, toast, remote } = useStore();
-  const [mode, setMode] = useState<"upload" | "folder">("upload");
+export function AddProjectModal({ onClose, start = "upload" }: { onClose: () => void; start?: "upload" | "folder" | "uefn" }) {
+  const { server, session, settings, update, reload, toast, remote, uefns } = useStore();
+  const [mode, setMode] = useState(start);
   const [folder, setFolder] = useState("");
   const [name, setName] = useState("");
   const [steps, setSteps] = useState<Step[]>([]);
@@ -90,6 +90,20 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
     toast("Folder added. Looking for projects...", "good");
     await reload();
     onClose();
+  };
+
+  const isAdded = (path: string) => (settings.uefnAdded ?? []).some((p) => p.toLowerCase() === path.toLowerCase());
+  const addUefn = async (path: string) => {
+    update({ uefnAdded: [...(settings.uefnAdded ?? []), path] });
+    await reload();
+  };
+  const pickUefn = async () => {
+    const chosen = await open({ directory: true, multiple: false, title: "Choose the UEFN project folder" });
+    if (!chosen || Array.isArray(chosen)) return;
+    const found = (await api.scanUefn([chosen])).find((p) => p.path.toLowerCase() === chosen.toLowerCase());
+    if (!found) return toast("That folder has no .uefnproject file. Pick the project folder itself.", "bad");
+    if (!isAdded(found.path)) await addUefn(found.path);
+    toast(`${found.name} is added`, "good");
   };
 
   const upload = async () => {
@@ -222,6 +236,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
       <div className="tabs">
         <button className={`tab ${mode === "upload" ? "active" : ""}`} onClick={() => setMode("upload")}><UploadCloud size={16} /> Upload a local project</button>
         <button className={`tab ${mode === "folder" ? "active" : ""}`} onClick={() => setMode("folder")}><FolderSearch size={16} /> Show an existing folder</button>
+        <button className={`tab ${mode === "uefn" ? "active" : ""}`} onClick={() => setMode("uefn")}><Box size={16} /> UEFN project</button>
       </div>
 
       {mode === "upload" ? (
@@ -265,6 +280,19 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </>
+      ) : mode === "uefn" ? (
+        <div className="col">
+          <div className="muted">Only the UEFN projects you add here are shown. They keep working with Epic's server, and nothing in them changes.</div>
+          <div><button className="btn" onClick={pickUefn}><FolderOpen size={16} /> Choose a folder</button></div>
+          <table className="table"><tbody>
+            {uefns.filter((p) => !isAdded(p.path)).map((p) => (
+              <tr key={p.path}>
+                <td><b>{p.name}</b><div className="muted mono" style={{ fontSize: 12 }}>{p.path}</div></td>
+                <td style={{ width: 90, textAlign: "right" }}><button className="btn small" onClick={() => addUefn(p.path)}><Plus size={14} /> Add</button></td>
+              </tr>
+            ))}
+          </tbody></table>
+        </div>
       ) : (
         <div className="col">
           <div className="muted">Pick a folder that contains projects you already cloned with Lore. Projects inside it (up to three levels deep) show up in the list.</div>

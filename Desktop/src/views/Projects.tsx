@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowDownToLine, ArrowUpFromLine, Boxes, Check, CloudOff, Download, FilePen, FolderOpen, FolderPlus, Grid2x2, List, Play, RefreshCw, Search, Server as ServerIcon, Star, UploadCloud } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Boxes, Check, ChevronDown, ChevronRight, CloudOff, Download, FilePen, FolderOpen, FolderPlus, Grid2x2, List, Play, RefreshCw, Search, Server as ServerIcon, Star, UploadCloud } from "lucide-react";
 import { Avatar, Empty, Pill, Spinner, Thumb, useMenu } from "../components/ui";
 import { firstLine } from "../lib/parse";
 import { formatBytes, timeAgo } from "../lib/format";
 import { peekRevision, peekStatus, useAuthors, useCacheVersion, useLastRevision, useProjectActions, useStatus } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { api } from "../lib/api";
-import type { Project, SortKey } from "../lib/types";
+import type { GroupKey, Project, SortKey } from "../lib/types";
 import { SignInModal } from "../components/Servers";
 import { AddProjectModal } from "../components/AddProject";
 
-type Filter = "all" | "local" | "remote" | "unlinked" | "uefn";
+type Filter = "all" | "local" | "remote" | "unlinked";
 
 export const DRAG_TYPE = "application/x-lore-project";
 
@@ -77,6 +77,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
   const favorite = !!project.id && settings.favorites.includes(project.id);
   const working = busy[project.key];
   const behind = view.status ? view.status.remoteRevision - view.status.localRevision : 0;
+  const details = [madeWith(project, view.engine), view.bytes > 0 ? formatBytes(view.bytes) : "", view.last ? `${view.last.author}, ${timeAgo(view.last.date)}` : ""].filter(Boolean).join(" · ");
 
   const toggleFavorite = (event: React.MouseEvent) => {
     event.stopPropagation();
@@ -98,7 +99,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
         menu.open(e, [
           { label: "Open details", onClick: onOpen },
           ...(project.local ? [{ label: "Show in Explorer", onClick: () => api.openPath(project.local!.path) }] : []),
-          ...(project.uefn ? [{ label: "Show in Explorer", onClick: () => api.openPath(project.uefn!.path) }, { label: "Hide", onClick: () => update({ hidden: [...settings.hidden, project.uefn!.path] }) }] : []),
+          ...(project.uefn ? [{ label: "Show in Explorer", onClick: () => api.openPath(project.uefn!.path) }, { label: "Remove from Lore+", onClick: () => update({ uefnAdded: (settings.uefnAdded ?? []).filter((p) => p.toLowerCase() !== project.uefn!.path.toLowerCase()) }) }] : []),
           { label: favorite ? "Remove from favorites" : "Add to favorites", onClick: () => toggleFavorite(e) },
           ...(project.id && settings.assignments[project.id] ? [{ label: "Take out of its category", onClick: () => { const next = { ...settings.assignments }; delete next[project.id!]; update({ assignments: next }); } }] : []),
         ])
@@ -106,9 +107,11 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
     >
       <Thumb name={view.name} image={view.thumbnail}>
         <div className="overlay" />
+        <div className="people"><AuthorStack path={project.local?.path} fallback={project.remote?.authors} /></div>
         <div className="badges">
           <StatusPill project={project} status={view.status} />
           {view.status && view.status.changes > 0 && <Pill tone="muted" title={`${view.status.changes} files on this PC have changes that are not saved as a version yet`}><FilePen size={12} /> {view.status.changes}</Pill>}
+          <CategoryTag project={project} />
         </div>
         {project.id && (
           <button className="btn icon small ghost fav" onClick={toggleFavorite} title="Favorite" style={{ background: "rgba(10,12,18,0.55)", color: favorite ? "var(--warn)" : "#fff" }}>
@@ -117,43 +120,24 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
         )}
       </Thumb>
       <div className="card-body">
-        <div>
-          <div className="title-row">
-            <div className="card-title">{view.name}</div>
-            <AuthorStack path={project.local?.path} fallback={project.remote?.authors} />
-            <span className="spacer" />
-            <CategoryTag project={project} />
-          </div>
-          <div className="card-meta small" style={{ marginTop: 2 }}>
-            {view.engine || project.uefn ? <span>{madeWith(project, view.engine)}</span> : <span className="faint">{madeWith(project, view.engine)}</span>}
-            {view.bytes > 0 && <><span className="dotsep" /><span>{formatBytes(view.bytes)}</span></>}
-            {view.last && (
-              <>
-                <span className="dotsep" />
-                <span>{view.last.author}, {timeAgo(view.last.date)}</span>
-              </>
-            )}
-          </div>
+        <div className="card-text">
+          <div className="card-title" title={view.name}>{view.name}</div>
+          <div className="card-meta small" title={details}>{details}</div>
         </div>
         <div className="card-actions" onClick={(e) => e.stopPropagation()}>
-          {project.local ? (
+          {project.local || project.uefn ? (
             <>
-              <button className="btn small icon" title="Open the project folder" onClick={() => api.openPath(project.local!.path)}><FolderOpen size={15} /></button>
-              <button className="btn primary small" onClick={() => openProject(project)}><Play size={14} /> Open</button>
               {behind > 0 && (
-                <button className="btn small" disabled={!!working} onClick={() => sync(project)}>
-                  {working ? <Spinner size={14} /> : <Download size={14} />} Sync
+                <button className="btn small" title="Sync" disabled={!!working} onClick={() => sync(project)}>
+                  {working ? <Spinner size={14} /> : <Download size={14} />}<span className="label">Sync</span>
                 </button>
               )}
-            </>
-          ) : project.uefn ? (
-            <>
-              <button className="btn small icon" title="Open the project folder" onClick={() => api.openPath(project.uefn!.path)}><FolderOpen size={15} /></button>
-              <button className="btn primary small" title="Open in UEFN" onClick={() => openProject(project)}><Play size={14} /> Open</button>
+              <button className="btn small icon" title="Open the project folder" onClick={() => api.openPath((project.local ?? project.uefn)!.path)}><FolderOpen size={15} /></button>
+              <button className="btn primary small" title={project.uefn ? "Open in UEFN" : "Open"} onClick={() => openProject(project)}><Play size={14} /><span className="label">Open</span></button>
             </>
           ) : project.onServer ? (
-            <button className="btn primary small" disabled={!!working} onClick={() => clone(project)}>
-              {working ? <Spinner size={14} /> : <Download size={14} />} {working ?? "Clone to this PC"}
+            <button className="btn primary small" title="Clone to this PC" disabled={!!working} onClick={() => clone(project)}>
+              {working ? <Spinner size={14} /> : <Download size={14} />}<span className="label">{working ?? "Clone"}</span>
             </button>
           ) : null}
         </div>
@@ -207,6 +191,7 @@ export function Projects() {
   const [filter, setFilter] = useState<Filter>("all");
   const [signIn, setSignIn] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [engine, setEngine] = useState("");
   useCacheVersion();
   const grid = settings.view === "grid";
   const size = grid ? settings.size.grid : settings.size.list;
@@ -228,7 +213,7 @@ export function Projects() {
   }, [grid]);
 
   const categoryIds = useMemo(() => {
-    if (category === "all") return null;
+    if (category === "all" || category === "uefn") return null;
     const ids = new Set<string>([category]);
     let grew = true;
     while (grew) {
@@ -243,12 +228,16 @@ export function Projects() {
     return ids;
   }, [category, categories]);
 
+  const engineOf = (p: Project) => (p.uefn ? "UEFN" : (p.id && settings.overrides[p.id]?.engine) || p.local?.engine || p.remote?.engine ? `Unreal ${(p.id && settings.overrides[p.id]?.engine) || p.local?.engine || p.remote?.engine}` : "Unknown");
+  const engineNames = [...new Set(projects.map(engineOf))].sort();
+
   const shown = projects.filter((p) => {
     if (query && !p.name.toLowerCase().includes(query.toLowerCase())) return false;
     if (filter === "local" && !p.local && !p.uefn) return false;
     if (filter === "remote" && (p.local || p.uefn)) return false;
     if (filter === "unlinked" && (p.onServer || p.uefn)) return false;
-    if (filter === "uefn" && !p.uefn) return false;
+    if (category === "uefn" && !p.uefn) return false;
+    if (engine && engineOf(p) !== engine) return false;
     if (categoryIds) {
       const assigned = p.id ? settings.assignments[p.id] : undefined;
       if (!assigned || !categoryIds.has(assigned)) return false;
@@ -268,7 +257,19 @@ export function Projects() {
     }
   });
 
-  const title = category === "all" ? "Projects" : categories.find((c) => c.id === category)?.name ?? "Projects";
+  // Sections of the list. Folded ones are remembered, per way of grouping.
+  const groupBy = category === "all" ? settings.groupBy : "none";
+  const groupOf = (p: Project) => {
+    if (groupBy === "engine") return engineOf(p);
+    return categories.find((c) => p.id && c.id === settings.assignments[p.id])?.name ?? "No category";
+  };
+  const groups = groupBy === "none" ? [] : [...new Set(sorted.map(groupOf))].sort((a, b) => Number(a === "No category") - Number(b === "No category") || a.localeCompare(b));
+  const toggleGroup = (key: string) => update({ collapsed: settings.collapsed.includes(key) ? settings.collapsed.filter((c) => c !== key) : [...settings.collapsed, key] });
+  const items = (list: Project[]) => settings.view === "grid"
+    ? <div className="grid">{list.map((p) => <ProjectCard key={p.key} project={p} onOpen={() => go("project", p.key)} />)}</div>
+    : <div className="list">{list.map((p) => <ListRow key={p.key} project={p} onOpen={() => go("project", p.key)} />)}</div>;
+
+  const title = category === "uefn" ? "UEFN" : category === "all" ? "Projects" : categories.find((c) => c.id === category)?.name ?? "Projects";
   const chip = (id: Filter, label: string) => (
     <button key={id} className={`btn small ${filter === id ? "primary" : "ghost"}`} onClick={() => setFilter(id)}>{label}</button>
   );
@@ -282,6 +283,13 @@ export function Projects() {
         </div>
         <div className="spacer" />
         <label className="search"><Search size={16} /><input placeholder="Search projects" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+        {category === "all" && (
+          <select className="select sort" value={settings.groupBy} onChange={(e) => update({ groupBy: e.target.value as GroupKey })} title="Group">
+            <option value="none">No groups</option>
+            <option value="category">By category</option>
+            <option value="engine">By engine</option>
+          </select>
+        )}
         <select className="select sort" value={settings.sort} onChange={(e) => update({ sort: e.target.value as SortKey })} title="Sort">
           <option value="name">Name</option>
           <option value="opened">Recently opened</option>
@@ -301,7 +309,12 @@ export function Projects() {
           {chip("local", "On this PC")}
           {chip("remote", "Not on this PC")}
           {chip("unlinked", "Not on server")}
-          {projects.some((p) => p.uefn) && chip("uefn", "UEFN")}
+          {engineNames.length > 1 && (
+            <select className="select sort" style={{ height: 30 }} value={engine} onChange={(e) => setEngine(e.target.value)} title="Engine">
+              <option value="">All engines</option>
+              {engineNames.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          )}
         </div>
 
         {server && !session && (
@@ -316,14 +329,22 @@ export function Projects() {
         {loading && projects.length === 0 ? (
           <div className="grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 300 }} />)}</div>
         ) : shown.length === 0 ? (
-          <Empty icon={<Boxes size={28} />} title={projects.length === 0 ? "No projects yet" : "Nothing matches"}>
-            {projects.length === 0 ? "Sign in to a server, or add a project from this PC." : "Try another filter or search."}
+          <Empty icon={<Boxes size={28} />} title={category === "uefn" ? "No UEFN projects added" : projects.length === 0 ? "No projects yet" : "Nothing matches"}>
+            {category === "uefn" ? "Use Add project to choose which UEFN projects are shown here." : projects.length === 0 ? "Sign in to a server, or add a project from this PC." : "Try another filter or search."}
           </Empty>
-        ) : settings.view === "grid" ? (
-          <div className="grid">{sorted.map((p) => <ProjectCard key={p.key} project={p} onOpen={() => go("project", p.key)} />)}</div>
-        ) : (
-          <div className="list">{sorted.map((p) => <ListRow key={p.key} project={p} onOpen={() => go("project", p.key)} />)}</div>
-        )}
+        ) : groupBy === "none" ? items(sorted) : groups.map((name) => {
+          const list = sorted.filter((p) => groupOf(p) === name);
+          const key = `${groupBy}:${name}`;
+          const folded = settings.collapsed.includes(key);
+          return (
+            <section key={key} className="group">
+              <button className="group-head" onClick={() => toggleGroup(key)}>
+                {folded ? <ChevronRight size={16} /> : <ChevronDown size={16} />} {name} <span className="count">{list.length}</span>
+              </button>
+              {!folded && items(list)}
+            </section>
+          );
+        })}
       </div>
       <div className="size-float" title="Size (also Ctrl + scroll)">
         <Grid2x2 size={13} />
@@ -331,7 +352,7 @@ export function Projects() {
         <Grid2x2 size={18} />
       </div>
       {signIn && server && <SignInModal server={server} onClose={() => setSignIn(false)} />}
-      {adding && <AddProjectModal onClose={() => setAdding(false)} />}
+      {adding && <AddProjectModal start={category === "uefn" ? "uefn" : "upload"} onClose={() => setAdding(false)} />}
     </>
   );
 }

@@ -254,7 +254,7 @@ function MirrorSettings({ project }: { project: Project }) {
 }
 
 function ProjectSettings({ projectKey }: { projectKey: string }) {
-  const { projects, settings, update, engines, toast, categories, reload } = useStore();
+  const { projects, settings, update, engines, toast, categories, reload, go } = useStore();
   const project = projects.find((p) => p.key === projectKey)!;
   const id = project.id;
   const override = (id && settings.overrides[id]) || {};
@@ -299,6 +299,11 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
         </select>
       </Field>
       <MirrorSettings project={project} />
+      {project.uefn && (
+        <Field label="In this app" hint="The project itself stays where it is, and you can add it again under Add project.">
+          <button className="btn" onClick={() => { update({ uefnAdded: (settings.uefnAdded ?? []).filter((p) => p.toLowerCase() !== project.uefn!.path.toLowerCase()) }); go("projects"); }}>Remove from Lore+</button>
+        </Field>
+      )}
       <Field label="Thumbnail" hint={project.uefn ? "Only used in this app on this PC. The UEFN project itself is not changed." : "Saved in the Unreal project itself (a .png next to the .uproject). It goes to the server with the next version you save, so everybody sees it."}>
         <div className="row gap-s">
           <button className="btn" disabled={!project.local?.uproject && !project.uefn} onClick={async () => {

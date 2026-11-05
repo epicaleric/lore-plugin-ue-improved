@@ -27,6 +27,8 @@ export const defaultSettings: Settings = {
   sort: "name",
   mirrors: {},
   uefnBackups: {},
+  groupBy: "none",
+  collapsed: [],
   size: { grid: 250, list: 52 },
   opened: {},
   autoUpdate: { lore: true, plugin: true, app: true },
@@ -233,16 +235,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       // Projects of UEFN. Their revisions are read afterwards, from copies of their stores, one at a time.
       const used = new Set<string>();
-      const uefn = (await api.scanUefn(roots).catch(() => [])).map((project): UefnProject => {
+      const uefn = (await api.scanUefn([...roots, ...(settingsRef.current.uefnAdded ?? [])]).catch(() => [])).map((project): UefnProject => {
         const id = project.projectId && !used.has(project.projectId) ? `uefn-${project.projectId}` : `uefn-${project.path.replace(/[^A-Za-z0-9]+/g, "-")}`;
         if (project.projectId) used.add(project.projectId);
         return { ...project, id };
       });
       setUefns(uefn);
+      // Projects are added by hand. What was already put to use before that existed stays.
+      if (!settingsRef.current.uefnAdded) {
+        const { assignments, favorites, uefnBackups } = settingsRef.current;
+        update({ uefnAdded: uefn.filter((p) => assignments[p.id] || favorites.includes(p.id) || uefnBackups[p.id]).map((p) => p.path) });
+      }
+      const added = (settingsRef.current.uefnAdded ?? []).map((path) => path.toLowerCase());
       if (!readingUefn.current) {
         readingUefn.current = true;
         (async () => {
-          for (const project of uefn.filter((p) => p.store === "lore")) {
+          for (const project of uefn.filter((p) => p.store === "lore" && added.includes(p.path.toLowerCase()))) {
             const copy = await api.uefnSnapshot(project.path, project.id).catch(() => null);
             const history = copy ? await api.lore(["history", "60"], copy) : null;
             // Revisions from UEFN usually name an Epic account id, not a person.
@@ -329,7 +337,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     }
     for (const project of uefns) {
-      if (!settings.hidden.includes(project.path)) {
+      if ((settings.uefnAdded ?? []).some((path) => path.toLowerCase() === project.path.toLowerCase())) {
         list.push({ key: project.id, id: project.id, name: project.name, onServer: false, copies: [], uefn: { ...project, revisions: uefnHistory[project.id] } });
       }
     }
@@ -341,7 +349,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return !assigned || !known.has(assigned) || shown.has(assigned);
     });
     return allowed.sort((a, b) => a.name.localeCompare(b.name));
-  }, [remote, locals, uefns, uefnHistory, remoteInfo, settings.hidden, settings.assignments, settings.categories, settings.uefnBackups, categories]);
+  }, [remote, locals, uefns, uefnHistory, remoteInfo, settings.hidden, settings.assignments, settings.categories, settings.uefnBackups, settings.uefnAdded, categories]);
 
   // Where the user has been, so the mouse's back button works like in a browser.
   const trail = useRef<{ view: View; projectKey: string | null; category: string }[]>([{ view: "projects", projectKey: null, category: "all" }]);
