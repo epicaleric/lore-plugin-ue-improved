@@ -2,8 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, adminApi } from "./api";
 import { parseInfo, parseRepoList } from "./parse";
 import { readableOn } from "./format";
+import { cachedRemoteInfo, loadRemoteInfo } from "./remote";
 import { SHARED_NAME, createShared, pullShared, pushShared, shareWithEveryone, visibleCategories } from "./shared";
-import type { Category, Engine, LocalProject, Project, RemoteRepo, Server, SessionInfo, Settings } from "./types";
+import type { Category, Engine, RemoteInfo, LocalProject, Project, RemoteRepo, Server, SessionInfo, Settings } from "./types";
 
 export type View = "projects" | "project" | "admin" | "updates" | "settings";
 
@@ -70,6 +71,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [remote, setRemote] = useState<RemoteRepo[]>([]);
+  const [remoteInfo, setRemoteInfo] = useState<Record<string, RemoteInfo>>({});
   const [sharedActive, setSharedActive] = useState(false);
   const sharedRef = useRef(false);
   const adminRef = useRef(false);
@@ -245,6 +247,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const categories = useMemo(() => visibleCategories(settings.categories, session?.userName, isAdmin), [settings.categories, session?.userName, isAdmin]);
 
+  // What the server knows about each project (thumbnail, size, files, people), read without downloading the projects.
+  useEffect(() => {
+    if (!ready || !server || !session || remote.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      // What was found last time is shown straight away.
+      const cached = await Promise.all(remote.map(async (repo) => [repo.id, await cachedRemoteInfo(repo)] as const));
+      if (cancelled) return;
+      const found: Record<string, RemoteInfo> = {};
+      for (const [id, info] of cached) if (info) found[id] = info;
+      setRemoteInfo((all) => ({ ...all, ...found }));
+      // Then they are brought up to date, two at a time.
+      const queue = [...remote];
+      const worker = async () => {
+        for (let repo = queue.shift(); repo && !cancelled; repo = queue.shift()) {
+          try {
+            const known = cached.find(([id]) => id === repo!.id)?.[1] ?? null;
+            const info = await loadRemoteInfo(server, repo, known);
+            if (info && !cancelled) setRemoteInfo((all) => ({ ...all, [repo!.id]: info }));
+          } catch {
+            // a project that cannot be read just has no extra information
+          }
+        }
+      };
+      await Promise.all([worker(), worker()]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, server?.id, session?.userName, remote]);
+
   const projects = useMemo<Project[]>(() => {
     // One project can have several working copies on this PC; the first one is shown, the others are listed in its details.
     const visible = locals.filter((l) => !settings.hidden.includes(l.path));
@@ -258,7 +291,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     for (const repo of remote) {
       const copies = byKey.get(repo.id) ?? [];
       used.add(repo.id);
-      list.push({ key: repo.id, id: repo.id, name: repo.name, onServer: true, local: copies[0], copies: copies.slice(1) });
+      list.push({ key: repo.id, id: repo.id, name: repo.name, onServer: true, local: copies[0], copies: copies.slice(1), remote: remoteInfo[repo.id] });
     }
     for (const [key, copies] of byKey) {
       if (!used.has(key)) {
@@ -273,7 +306,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return !assigned || !known.has(assigned) || shown.has(assigned);
     });
     return allowed.sort((a, b) => a.name.localeCompare(b.name));
-  }, [remote, locals, settings.hidden, settings.assignments, settings.categories, categories]);
+  }, [remote, locals, remoteInfo, settings.hidden, settings.assignments, settings.categories, categories]);
 
   // Where the user has been, so the mouse's back button works like in a browser.
   const trail = useRef<{ view: View; projectKey: string | null; category: string }[]>([{ view: "projects", projectKey: null, category: "all" }]);

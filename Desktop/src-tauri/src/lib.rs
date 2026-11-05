@@ -47,6 +47,28 @@ fn meta_dir(app: AppHandle, server_id: String) -> Result<String, String> {
     Ok(dir.join(server_id).to_string_lossy().to_string())
 }
 
+/// Folder where bare clones of the projects on the server are kept. A bare clone has no files, only the tree of the latest revision.
+#[tauri::command]
+fn bare_dir(app: AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("bare");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// Removes something from the bare clone folder (it is only a cache of what is on the server).
+#[tauri::command]
+fn remove_cache(app: AppHandle, path: String) -> Result<(), String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?.join("bare");
+    let target = std::path::PathBuf::from(&path);
+    if !target.starts_with(&base) || target == base {
+        return Err("That is not part of the cache.".into());
+    }
+    if target.is_dir() {
+        std::fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ------------------------------------------------------------------ sign-in
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -221,6 +243,8 @@ pub fn run() {
             get_settings,
             save_settings,
             meta_dir,
+            bare_dir,
+            remove_cache,
             system::read_text_file,
             sign_in,
             sign_in_api_key,

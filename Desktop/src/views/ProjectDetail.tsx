@@ -252,6 +252,30 @@ function Files({ project, inSync, changes }: { project: Project; inSync: boolean
   );
 }
 
+/** The same overview for a project that is only on the server, read from there. */
+function RemoteFiles({ project }: { project: Project }) {
+  const info = project.remote!;
+  const largest = Math.max(1, ...info.entries.map((e) => e.bytes));
+  return (
+    <div className="panel">
+      <div className="row between">
+        <h3>Files in the project</h3>
+        <span className="muted">{info.files.toLocaleString()} files · {formatBytes(info.bytes)}</span>
+      </div>
+      <div className="desc">What is on {project.name}'s server at revision {info.revision}. Clone the project to get the files on this PC.</div>
+      <table className="table"><tbody>
+        {info.entries.map((entry) => (
+          <tr key={entry.name}>
+            <td style={{ width: 230 }}><span className="mono">{entry.name}{entry.dir ? "/" : ""}</span></td>
+            <td><div className="progress" style={{ marginTop: 0 }}><span style={{ width: `${Math.max(2, (entry.bytes / largest) * 100)}%` }} /></div></td>
+            <td className="muted" style={{ width: 90, textAlign: "right" }}>{formatBytes(entry.bytes)}</td>
+          </tr>
+        ))}
+      </tbody></table>
+    </div>
+  );
+}
+
 function Copies({ project }: { project: Project }) {
   const { move } = useCopyTools(project);
   const { deleteLocal, hide } = useDeletes();
@@ -403,7 +427,7 @@ export function ProjectDetail() {
                 </tbody></table>
               </div>
             )}
-            {project.local && <Files project={project} inSync={view.status?.inSync} changes={view.status?.changes} />}
+            {project.local ? <Files project={project} inSync={view.status?.inSync} changes={view.status?.changes} /> : project.remote ? <RemoteFiles project={project} /> : null}
             <Copies project={project} />
             {!project.onServer && <div className="banner">This project is only on this PC. Use <b>Add project</b> on the Projects page to put it on {server?.label ?? "the server"}.</div>}
           </div>

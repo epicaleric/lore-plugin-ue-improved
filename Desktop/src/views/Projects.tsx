@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowDownToLine, ArrowUpFromLine, Boxes, Check, CloudOff, Download, FilePen, FolderOpen, FolderPlus, Grid2x2, List, Play, RefreshCw, Search, Server as ServerIcon, Star, UploadCloud } from "lucide-react";
 import { Avatar, Empty, Pill, Spinner, Thumb, useMenu } from "../components/ui";
 import { firstLine } from "../lib/parse";
-import { timeAgo } from "../lib/format";
+import { formatBytes, timeAgo } from "../lib/format";
 import { peekRevision, peekStatus, useAuthors, useCacheVersion, useLastRevision, useProjectActions, useStatus } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { api } from "../lib/api";
@@ -19,11 +19,12 @@ export function useProjectView(project: Project) {
   const { settings, server } = useStore();
   const override = project.id ? settings.overrides[project.id] : undefined;
   const status = useStatus(project.local?.path, server?.id, 0);
-  const last = useLastRevision(project.local?.path, 0);
+  const localLast = useLastRevision(project.local?.path, 0);
+  const last = localLast ?? project.remote?.last ?? null;
   const name = override?.displayName || project.name;
-  const engine = override?.engine || project.local?.engine || null;
-  const thumbnail = override?.thumbnail || project.local?.thumbnail || null;
-  return { name, engine, thumbnail, status, last, override };
+  const engine = override?.engine || project.local?.engine || project.remote?.engine || null;
+  const thumbnail = override?.thumbnail || project.local?.thumbnail || project.remote?.thumbnail || null;
+  return { name, engine, thumbnail, status, last, override, bytes: project.remote?.bytes ?? 0 };
 }
 
 export function StatusPill({ project, status }: { project: Project; status: ReturnType<typeof useStatus> }) {
@@ -40,8 +41,9 @@ export function StatusPill({ project, status }: { project: Project; status: Retu
 }
 
 /** Small overlapping avatars of everybody who saved a version. */
-export function AuthorStack({ path }: { path: string | undefined }) {
-  const authors = useAuthors(path);
+export function AuthorStack({ path, fallback }: { path: string | undefined; fallback?: string[] }) {
+  const local = useAuthors(path);
+  const authors = local && local.length > 0 ? local : fallback;
   if (!authors || authors.length === 0) return null;
   const shown = authors.slice(0, 4);
   return (
@@ -109,12 +111,13 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
         <div>
           <div className="title-row">
             <div className="card-title">{view.name}</div>
-            <AuthorStack path={project.local?.path} />
+            <AuthorStack path={project.local?.path} fallback={project.remote?.authors} />
             <span className="spacer" />
             <CategoryTag project={project} />
           </div>
           <div className="card-meta small" style={{ marginTop: 2 }}>
             {view.engine ? <span>Unreal {view.engine}</span> : <span className="faint">Engine unknown</span>}
+            {view.bytes > 0 && <><span className="dotsep" /><span>{formatBytes(view.bytes)}</span></>}
             {view.last && (
               <>
                 <span className="dotsep" />
@@ -158,13 +161,13 @@ function ListRow({ project, onOpen }: { project: Project; onOpen: () => void }) 
           <div className="card-title">{view.name}</div>
           <CategoryTag project={project} />
         </div>
-        <div className="card-meta small" style={{ marginTop: 2 }}>{view.engine ? `Unreal ${view.engine}` : "Engine unknown"}</div>
+        <div className="card-meta small" style={{ marginTop: 2 }}>{view.engine ? `Unreal ${view.engine}` : "Engine unknown"}{view.bytes > 0 ? ` · ${formatBytes(view.bytes)}` : ""}</div>
       </div>
       <div className="row" style={{ gap: 6 }}><StatusPill project={project} status={view.status} /></div>
       <div className="muted" style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {view.last ? `${view.last.author}, ${timeAgo(view.last.date)}` : ""}
       </div>
-      <div><AuthorStack path={project.local?.path} /></div>
+      <div><AuthorStack path={project.local?.path} fallback={project.remote?.authors} /></div>
       <div onClick={(e) => e.stopPropagation()}>
         {project.local ? (
           <div className="row" style={{ gap: 10 }}>

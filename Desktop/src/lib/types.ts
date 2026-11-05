@@ -84,6 +84,21 @@ export interface LocalProject {
   branch?: string;
 }
 
+/** What is known about a project on the server without having it on this PC. */
+export interface RemoteInfo {
+  /** revision this was read at */
+  revision: number;
+  files: number;
+  bytes: number;
+  /** top level of the project with sizes */
+  entries: { name: string; dir: boolean; bytes: number }[];
+  engine: string | null;
+  /** path of the thumbnail picked from the project, in the app's cache */
+  thumbnail: string | null;
+  authors: string[];
+  last: Revision | null;
+}
+
 export interface Project {
   /** repository id (or the local path when the project is not on the server) */
   key: string;
@@ -91,6 +106,8 @@ export interface Project {
   name: string;
   onServer: boolean;
   local?: LocalProject;
+  /** read from the server */
+  remote?: RemoteInfo;
   /** further working copies of the same project on this PC */
   copies: LocalProject[];
 }

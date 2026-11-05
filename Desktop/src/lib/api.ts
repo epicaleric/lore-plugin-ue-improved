@@ -31,6 +31,8 @@ export const api = {
       stop();
     }
   },
+  bareDir: () => invoke<string>("bare_dir"),
+  removeCache: (path: string) => invoke<void>("remove_cache", { path }),
   moveFolder: (from: string, toParent: string) => invoke<string>("move_folder", { from, toParent }),
   setAsideFolder: (path: string) => invoke<string>("set_aside_folder", { path }),
   relinkLore: (folder: string, fresh: string) => invoke<string>("relink_lore", { folder, fresh }),

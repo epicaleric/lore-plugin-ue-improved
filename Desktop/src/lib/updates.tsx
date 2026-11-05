@@ -186,9 +186,8 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
       for (const engine of engines) {
         if (pluginOutdated(engine.plugin)) installPlugin("engine", engine.path);
       }
-      for (const project of locals) {
-        if (pluginOutdated(project.plugin)) installPlugin("project", project.path);
-      }
+      // Projects are not changed on their own: the plugin files in a project are saved in Lore, so a new
+      // version there is a change the person has to save (and it can clash with a sync).
     }
     if (settings.autoUpdate.app && app.outdated && app.asset) installApp();
   }, [checking, ready, lore.latest, plugin.latest, engines.length, locals.length]);

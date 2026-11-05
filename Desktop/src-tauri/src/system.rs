@@ -165,7 +165,15 @@ pub fn read_project(path: String) -> Value {
         }
     }
     let mut thumbnail = Value::Null;
-    for candidate in [r"Saved\AutoScreenshot.png", r"Thumbnail.png", r"Saved\Thumbnail.png"] {
+    // Unreal's own project thumbnail is the .png with the name of the .uproject, next to it.
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(stem) = uproject.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().to_string()) {
+        candidates.push(format!("{stem}.png"));
+    }
+    for fixed in [r"Saved\AutoScreenshot.png", r"Thumbnail.png", r"Saved\Thumbnail.png"] {
+        candidates.push(fixed.to_string());
+    }
+    for candidate in candidates {
         let path = dir.join(candidate);
         if path.exists() {
             thumbnail = Value::String(path.to_string_lossy().to_string());

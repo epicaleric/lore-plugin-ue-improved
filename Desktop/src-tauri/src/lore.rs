@@ -94,6 +94,10 @@ pub async fn run(args: &[String], repository: Option<&str>, token: Option<&str>)
     command.arg("--no-pager").arg("--non-interactive");
     if let Some(path) = repository {
         command.arg("--repository").arg(path);
+        // Paths in commands such as `file info` are relative to the working directory.
+        if Path::new(path).is_dir() {
+            command.current_dir(path);
+        }
     }
     // More parallel connections make uploads and downloads much quicker.
     if matches!(args.first().map(String::as_str), Some("push" | "clone" | "sync")) {
@@ -136,6 +140,10 @@ where
     command.arg("--no-pager").arg("--non-interactive").args(["--event-interval", "500"]);
     if let Some(path) = repository {
         command.arg("--repository").arg(path);
+        // Paths in commands such as `file info` are relative to the working directory.
+        if Path::new(path).is_dir() {
+            command.current_dir(path);
+        }
     }
     if matches!(args.first().map(String::as_str), Some("push" | "clone" | "sync")) {
         command.args(["--max-connections", "8"]);

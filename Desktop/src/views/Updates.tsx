@@ -117,6 +117,7 @@ export function Updates() {
           {engines.map((engine) => <Log key={engine.path} lines={u.logs[`plugin:${engine.path}`]} />)}
 
           <div className="section-title">Projects on this PC</div>
+          <div className="faint" style={{ fontSize: 12.5, marginBottom: 8 }}>Projects are only changed when you press Update here. The plugin in a project is saved in Lore, so a new version of it is a change you save as a version afterwards.</div>
           {locals.length === 0 ? <div className="muted">No projects found yet.</div> : (
             <table className="table"><tbody>
               {locals.map((project) => {

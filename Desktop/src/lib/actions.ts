@@ -157,7 +157,14 @@ export function useProjectActions() {
     if (!path || !server) return;
     await run(project.key, "Syncing", async () => {
       const result = await api.lore(["sync"], path, server.id);
-      if (!result.ok) throw new Error((result.stderr || result.stdout).trim().split("\n").slice(0, 3).join(" "));
+      if (!result.ok) {
+        const text = (result.stderr || result.stdout).trim();
+        if (/file has local changes/i.test(text)) {
+          const files = [...text.matchAll(/File has local changes:\s*(\S+)/g)].map((m) => m[1]);
+          throw new Error(`Syncing stopped: ${files.length} file${files.length === 1 ? " has" : "s have"} changes on this PC that the new version changes as well (${files.slice(0, 2).join(", ")}${files.length > 2 ? ", ..." : ""}). Save your changes as a version first, then sync again.`);
+        }
+        throw new Error(text.split("\n").slice(0, 3).join(" "));
+      }
       toast(`${project.name} is up to date`, "good");
       invalidateStatus();
       await reload();
