@@ -7,7 +7,7 @@ All notable changes to this plugin. Versions follow `VersionName` in `LoreSource
 - Settings tab: choose any accent colour and avatar colour, with presets and the editor's colour picker.
   New users get a random avatar colour that no other known author has.
 - Text on coloured backgrounds (avatars, badges) switches between dark and light so it stays readable.
-- The AI button is now a gradient **Generate** button in the description box.
+- The AI button is now a pill-shaped **Generate** button in the description box.
 - Description language is free text, so any language can be used.
 - Gemini: uses the newest flash model the key can use and falls back to the next flash model when a limit is
   reached. The model setting is gone.

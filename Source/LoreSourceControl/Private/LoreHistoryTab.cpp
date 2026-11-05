@@ -65,7 +65,7 @@ namespace
 {
 	const FName LoreHistoryTabName(TEXT("LoreHistory"));
 	constexpr int32 HistoryCount = 40;
-	const FString PluginRepositoryUrl(TEXT("https://github.com/epicaleric/lore-source-control-ue"));
+	const FString PluginRepositoryUrl(TEXT("https://github.com/epicaleric/lore-plugin-ue-improved"));
 
 	using FContext = LoreSourceControlUtils::FLoreCommandContext;
 
@@ -1345,40 +1345,28 @@ public:
 
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
 	{
-		static const FSlateRoundedBoxBrush InnerBrush(FLinearColor::White, Height * 0.5f - 2.0f);
+		static const FSlateRoundedBoxBrush ButtonPill(FLinearColor::White, Height * 0.5f);
 		const bool bBusy = IsBusy.Get(false);
 		const float Fade = bBusy ? 0.55f : 1.0f;
 		const FVector2f Size = AllottedGeometry.GetLocalSize();
 
-		FLinearColor Left = ShiftHue(Accent, -40.0f);
-		FLinearColor Right = ShiftHue(Accent, 55.0f);
-		Left.A = Fade;
-		Right.A = Fade;
+		// A plain pill in the plugin's accent colour; text and sparkles use whichever of dark or light reads best on it.
+		FLinearColor Fill = IsHovered() ? FMath::Lerp(Accent, FLinearColor::White, 0.18f) : Accent;
+		Fill.A = Fade;
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), &ButtonPill, ESlateDrawEffect::None, Fill);
 
-		TArray<FSlateGradientStop> Stops;
-		Stops.Add(FSlateGradientStop(FVector2f(0.0f, 0.0f), Left));
-		Stops.Add(FSlateGradientStop(Size, Right));
-		FSlateDrawElement::MakeGradient(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), Stops, Orient_Vertical, ESlateDrawEffect::NoGamma, FVector4f(Height * 0.5f));
-
-		const FLinearColor Fill = IsHovered() ? FLinearColor(0.045f, 0.045f, 0.06f, 1.0f) : FLinearColor(0.010f, 0.010f, 0.014f, 1.0f);
-		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1,
-			AllottedGeometry.ToPaintGeometry(Size - FVector2f(4.0f, 4.0f), FSlateLayoutTransform(FVector2f(2.0f, 2.0f))),
-			&InnerBrush, ESlateDrawEffect::None, Fill);
-
-		// Sparkles, filled by stacking shrinking outlines.
-		const FLinearColor Sparkle = FLinearColor::LerpUsingHSV(Left, Right, 0.35f);
-		DrawSparkle(OutDrawElements, LayerId + 2, AllottedGeometry, FVector2f(17.0f, Size.Y * 0.5f + 1.5f), 7.5f, Sparkle);
-		DrawSparkle(OutDrawElements, LayerId + 2, AllottedGeometry, FVector2f(28.0f, Size.Y * 0.5f - 6.0f), 4.0f, Sparkle);
+		const FLinearColor Ink = ContrastFor(Accent).GetSpecifiedColor().CopyWithNewOpacity(Fade);
+		DrawSparkle(OutDrawElements, LayerId + 1, AllottedGeometry, FVector2f(18.0f, Size.Y * 0.5f + 1.0f), 5.0f, Ink);
+		DrawSparkle(OutDrawElements, LayerId + 1, AllottedGeometry, FVector2f(26.0f, Size.Y * 0.5f - 5.0f), 2.6f, Ink);
 
 		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 10);
 		const FString Label = bBusy ? TEXT("Working...") : TEXT("Generate");
 		const TSharedRef<FSlateFontMeasure> Measure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
 		const FVector2f TextSize = Measure->Measure(Label, Font);
-		const FLinearColor TextColor = FMath::Lerp(Right, FLinearColor::White, 0.45f);
-		FSlateDrawElement::MakeText(OutDrawElements, LayerId + 2,
-			AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(40.0f, (Size.Y - TextSize.Y) * 0.5f))),
-			Label, Font, ESlateDrawEffect::None, TextColor.CopyWithNewOpacity(Fade));
-		return LayerId + 2;
+		FSlateDrawElement::MakeText(OutDrawElements, LayerId + 1,
+			AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(36.0f, (Size.Y - TextSize.Y) * 0.5f))),
+			Label, Font, ESlateDrawEffect::None, Ink);
+		return LayerId + 1;
 	}
 
 	virtual FReply OnMouseButtonDown(const FGeometry&, const FPointerEvent& InEvent) override
@@ -1401,7 +1389,7 @@ public:
 	}
 
 private:
-	static constexpr float Width = 124.0f;
+	static constexpr float Width = 112.0f;
 	static constexpr float Height = 30.0f;
 
 	static FLinearColor ShiftHue(const FLinearColor& InColor, float InDegrees)
@@ -1417,7 +1405,7 @@ private:
 	{
 		for (int32 Step = 0; Step < 4; ++Step)
 		{
-			const float Outer = InRadius * (1.0f - 0.22f * Step);
+			const float Outer = InRadius * (1.0f - 0.25f * Step);
 			const float Inner = Outer * 0.30f;
 			TArray<FVector2f> Points;
 			Points.Add(InCenter + FVector2f(0.0f, -Outer));
@@ -1429,7 +1417,7 @@ private:
 			Points.Add(InCenter + FVector2f(-Outer, 0.0f));
 			Points.Add(InCenter + FVector2f(-Inner, -Inner));
 			Points.Add(InCenter + FVector2f(0.0f, -Outer));
-			FSlateDrawElement::MakeLines(OutDrawElements, InLayer, InGeometry.ToPaintGeometry(), Points, ESlateDrawEffect::None, InColor, true, 1.6f);
+			FSlateDrawElement::MakeLines(OutDrawElements, InLayer, InGeometry.ToPaintGeometry(), Points, ESlateDrawEffect::None, InColor, true, 1.3f);
 		}
 	}
 
@@ -2977,7 +2965,7 @@ private:
 		PluginRelease.Url = PluginRepositoryUrl;
 		StartReleaseCheck(TEXT("https://api.github.com/repos/EpicGames/lore/releases/latest"), true);
 		// This plugin's own version is read from the .uplugin file on the main branch of its repository.
-		StartReleaseCheck(TEXT("https://raw.githubusercontent.com/epicaleric/lore-source-control-ue/main/LoreSourceControl.uplugin"), false);
+		StartReleaseCheck(TEXT("https://raw.githubusercontent.com/epicaleric/lore-plugin-ue-improved/main/LoreSourceControl.uplugin"), false);
 	}
 
 	void StartReleaseCheck(const FString& InUrl, bool bInLoreClient)
