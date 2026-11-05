@@ -207,7 +207,7 @@ function Copies({ project }: { project: Project }) {
         <ConfirmModal
           title="Delete this copy from your PC?"
           text={`${ask.path} is removed from the disk. The project on the server is not touched, but changes you have not submitted are lost.`}
-          word={project.name}
+          word="delete"
           button="Delete the copy"
           onConfirm={() => deleteLocal(ask)}
           onClose={() => setAsk(null)}
@@ -235,7 +235,7 @@ function DangerZone({ project }: { project: Project }) {
         <ConfirmModal
           title={`Delete ${project.name} from the server?`}
           text="Everyone loses access to the project and its history. Make sure someone has a copy you want to keep."
-          word={project.name}
+          word="delete"
           button="Delete from the server"
           onConfirm={async () => { await deleteFromServer(project); go("projects"); }}
           onClose={() => setAsk(false)}

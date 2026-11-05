@@ -166,6 +166,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
                   <div>
                     <div>{step.label}</div>
                     {step.detail && <div className="faint" style={{ fontSize: 12 }}>{step.detail}</div>}
+                    {step.state === "run" && (step.label.startsWith("Save") || step.label.startsWith("Send")) && <div className="faint" style={{ fontSize: 12 }}>This can take several minutes for a big project. Lore is working on it.</div>}
                   </div>
                 </div>
               ))}

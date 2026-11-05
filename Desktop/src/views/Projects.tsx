@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowDownToLine, ArrowUpFromLine, Boxes, Check, CloudOff, Download, FilePen, FolderOpen, FolderPlus, GitCommitHorizontal, Grid2x2, List, Play, RefreshCw, Search, Server as ServerIcon, Star, UploadCloud } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Boxes, Check, CloudOff, Download, FilePen, FolderOpen, FolderPlus, Grid2x2, List, Play, RefreshCw, Search, Server as ServerIcon, Star, UploadCloud } from "lucide-react";
 import { Avatar, Empty, Pill, Spinner, Thumb, useMenu } from "../components/ui";
 import { firstLine } from "../lib/parse";
 import { timeAgo } from "../lib/format";
@@ -107,11 +107,13 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
       </Thumb>
       <div className="card-body">
         <div>
-          <div className="row between" style={{ gap: 8 }}>
+          <div className="title-row">
             <div className="card-title">{view.name}</div>
+            <AuthorStack path={project.local?.path} />
+            <span className="spacer" />
             <CategoryTag project={project} />
           </div>
-          <div className="card-meta" style={{ marginTop: 3 }}>
+          <div className="card-meta small" style={{ marginTop: 2 }}>
             {view.engine ? <span>Unreal {view.engine}</span> : <span className="faint">Engine unknown</span>}
             {view.last && (
               <>
@@ -121,20 +123,14 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
             )}
           </div>
         </div>
-        {project.local && (
-          <div className="card-meta" style={{ justifyContent: "space-between" }}>
-            <AuthorStack path={project.local.path} />
-            {view.status && view.status.remoteRevision > 0 && <span className="rev-count" title="Versions saved so far"><GitCommitHorizontal size={14} /> {view.status.remoteRevision}</span>}
-          </div>
-        )}
         <div className="card-meta" style={{ minHeight: 36, alignItems: "flex-start" }}>
           {view.last ? <span style={{ color: "#bfc6d8", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{firstLine(view.last.description)}</span> : <span className="faint">{project.local ? "No history yet" : "Clone to see the history"}</span>}
         </div>
         <div className="card-actions" onClick={(e) => e.stopPropagation()}>
           {project.local ? (
             <>
-              <button className="btn primary small" onClick={() => openProject(project)}><Play size={14} /> Open</button>
               <button className="btn small icon" title="Open the project folder" onClick={() => api.openPath(project.local!.path)}><FolderOpen size={15} /></button>
+              <button className="btn primary small" onClick={() => openProject(project)}><Play size={14} /> Open</button>
               {behind > 0 && (
                 <button className="btn small" disabled={!!working} onClick={() => sync(project)}>
                   {working ? <Spinner size={14} /> : <Download size={14} />} Sync
@@ -162,10 +158,10 @@ function ListRow({ project, onOpen }: { project: Project; onOpen: () => void }) 
     <div className="list-row" draggable={!!project.id} onDragStart={(e) => { if (project.id) { e.dataTransfer.setData(DRAG_TYPE, project.id); e.dataTransfer.effectAllowed = "move"; } }} onClick={onOpen}>
       <Thumb name={view.name} image={view.thumbnail} className="list-thumb" />
       <div style={{ minWidth: 0 }}>
-        <div className="card-title">{view.name}</div>
-        <div className="row" style={{ gap: 8, marginTop: 2 }}>
-          <CategoryTag project={project} />
+        <div className="title-row">
+          <div className="card-title">{view.name}</div>
           <AuthorStack path={project.local?.path} />
+          <CategoryTag project={project} />
         </div>
       </div>
       <div className="muted">{view.engine ? `UE ${view.engine}` : "-"}</div>
@@ -175,9 +171,9 @@ function ListRow({ project, onOpen }: { project: Project; onOpen: () => void }) 
       </div>
       <div onClick={(e) => e.stopPropagation()}>
         {project.local ? (
-          <div className="row" style={{ gap: 6 }}>
-            <button className="btn primary small" onClick={() => openProject(project)}><Play size={14} /> Open</button>
+          <div className="row" style={{ gap: 10 }}>
             <button className="btn small icon" title="Open the project folder" onClick={() => api.openPath(project.local!.path)}><FolderOpen size={15} /></button>
+            <button className="btn primary small" onClick={() => openProject(project)}><Play size={14} /> Open</button>
           </div>
         ) : project.onServer ? (
           <button className="btn small" disabled={!!working} onClick={() => clone(project)}>{working ? <Spinner size={14} /> : <Download size={14} />} Clone</button>

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, adminApi } from "./api";
 import { parseInfo, parseRepoList } from "./parse";
 import { readableOn } from "./format";
-import { SHARED_NAME, pullShared, pushShared, visibleCategories } from "./shared";
+import { SHARED_NAME, createShared, pullShared, pushShared, shareWithEveryone, visibleCategories } from "./shared";
 import type { Category, Engine, LocalProject, Project, RemoteRepo, Server, SessionInfo, Settings } from "./types";
 
 export type View = "projects" | "project" | "admin" | "updates" | "settings";
@@ -72,6 +72,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [sharedActive, setSharedActive] = useState(false);
   const sharedRef = useRef(false);
   const adminRef = useRef(false);
+  const settingUp = useRef(false);
+  const sharedWith = useRef<string | null>(null);
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [locals, setLocals] = useState<LocalProject[]>([]);
@@ -133,7 +135,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const info = await api.session(server.id).catch(() => null);
     setSession(info);
     if (info) {
-      adminApi
+      await adminApi
         .me(server)
         .then((me) => { adminRef.current = me.admin; setIsAdmin(me.admin); })
         .catch(() => { adminRef.current = false; setIsAdmin(false); });
@@ -156,8 +158,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && (await api.session(active.id).catch(() => null))) {
         const result = await api.lore(["repository", "list", active.loreUrl], null, active.id);
         if (result.ok) {
-          const all = parseRepoList(result.stdout);
-          const hasShared = all.some((r) => r.name === SHARED_NAME);
+          let all = parseRepoList(result.stdout);
+          let hasShared = all.some((r) => r.name === SHARED_NAME);
+
+          // Categories always live on the server. The first administrator who signs in creates the project for them.
+          if (!hasShared && adminRef.current && !settingUp.current) {
+            settingUp.current = true;
+            try {
+              await createShared(active, { version: 1, categories: current.categories, assignments: current.assignments });
+              hasShared = true;
+              all = [...all, { id: "", name: SHARED_NAME }];
+              toastRef.current("Your categories are now kept on the server for everybody", "good");
+            } catch (error) {
+              toastRef.current(`Could not set up the shared categories: ${error}`, "bad");
+            } finally {
+              settingUp.current = false;
+            }
+          }
+          // Everybody needs to be able to read them; this also catches users added since the last time.
+          if (hasShared && adminRef.current && sharedWith.current !== active.id) {
+            sharedWith.current = active.id;
+            shareWithEveryone(active).catch(() => { sharedWith.current = null; });
+          }
           sharedRef.current = hasShared;
           setSharedActive(hasShared);
           setRemote(all.filter((r) => r.name !== SHARED_NAME));
