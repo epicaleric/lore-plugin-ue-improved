@@ -111,6 +111,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
           url: release?.html_url ?? `${REPO_URL}/releases`,
           asset: asset?.browser_download_url,
           outdated: !!(currentVersion && latest && compareVersions(currentVersion, latest) < 0),
+          error: release ? undefined : "No release published yet",
         });
       } else {
         setApp({ ...empty("Lore+"), installed: currentVersion, error: "Could not check GitHub" });
