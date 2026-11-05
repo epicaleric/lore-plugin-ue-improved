@@ -242,6 +242,7 @@ pub fn run() {
             system::delete_folder,
             system::move_folder,
             system::set_aside_lore,
+            system::set_aside_folder,
             system::folder_stats,
         ])
         .run(tauri::generate_context!())

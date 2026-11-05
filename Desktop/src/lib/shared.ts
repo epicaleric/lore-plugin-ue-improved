@@ -23,14 +23,21 @@ function inOrder<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
+async function clone(server: Server, dir: string) {
+  const cloned = await api.lore(["clone", `${server.loreUrl}/${SHARED_NAME}`, dir], null, server.id);
+  if (!cloned.ok) throw fail(cloned);
+}
+
+/** The local copy is only a cache of what is on the server. When it is broken, it is set aside and fetched again. */
 async function bringUpToDate(server: Server, dir: string) {
   if (await api.exists(at(dir, ".lore"))) {
     const synced = await api.lore(["sync"], dir, server.id);
-    if (!synced.ok) throw fail(synced);
-  } else {
-    const cloned = await api.lore(["clone", `${server.loreUrl}/${SHARED_NAME}`, dir], null, server.id);
-    if (!cloned.ok) throw fail(cloned);
+    if (synced.ok) return;
+    // Only a copy that is broken is set aside; a network problem is reported as it is.
+    if (!/no remote configured|repository not found|corrupt/i.test(synced.stderr + synced.stdout)) throw fail(synced);
+    await api.setAsideFolder(dir);
   }
+  await clone(server, dir);
 }
 
 /** Brings the local copy up to date and returns what is in it, or null when nothing was saved there yet. */

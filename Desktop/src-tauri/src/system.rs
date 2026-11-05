@@ -513,3 +513,18 @@ pub fn folder_stats(path: String) -> Value {
     walk(Path::new(&path), &mut files, &mut bytes);
     json!({ "files": files, "bytes": bytes })
 }
+
+/// Renames a whole folder out of the way (nothing is deleted). Used for the cached copy of the shared settings when it is broken.
+#[tauri::command]
+pub fn set_aside_folder(path: String) -> Result<String, String> {
+    let dir = Path::new(&path);
+    if !dir.exists() {
+        return Ok(String::new());
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    name.push_str(&format!(".old-{stamp}"));
+    let target = dir.with_file_name(name);
+    std::fs::rename(dir, &target).map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}

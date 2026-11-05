@@ -27,6 +27,7 @@ export const api = {
     }
   },
   moveFolder: (from: string, toParent: string) => invoke<string>("move_folder", { from, toParent }),
+  setAsideFolder: (path: string) => invoke<string>("set_aside_folder", { path }),
   setAsideLore: (path: string) => invoke<string>("set_aside_lore", { path }),
   folderStats: (path: string) => invoke<{ files: number; bytes: number }>("folder_stats", { path }),
 
