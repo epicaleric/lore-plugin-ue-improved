@@ -105,7 +105,7 @@ export function Updates() {
                     <td style={{ width: 190 }}>{engine.plugin ? (old ? <Pill tone="warn">{engine.plugin} → {u.plugin.latest}</Pill> : <Pill tone="good"><Check size={12} /> {engine.plugin}</Pill>) : <Pill tone="muted">Not installed</Pill>}</td>
                     <td style={{ width: 130, textAlign: "right" }}>
                       <button className="btn small" disabled={u.busy[key]} onClick={() => u.installPlugin("engine", engine.path, engine.version)}>
-                        {u.busy[key] ? <Spinner size={14} /> : <Download size={14} />} {engine.plugin ? (old ? "Update" : "Rebuild") : "Install"}
+                        {u.busy[key] ? <Spinner size={14} /> : <Download size={14} />} {engine.plugin ? (old ? "Update" : "Reinstall") : "Install"}
                       </button>
                     </td>
                   </tr>

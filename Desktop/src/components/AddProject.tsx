@@ -187,8 +187,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
 
       invalidateStatus();
       // The folder is not under a scanned root yet when it was picked from anywhere on the disk.
-      const parent = folder.replace(/[\\/][^\\/]+$/, "");
-      if (!settings.roots.some((r) => folder.toLowerCase().startsWith(r.toLowerCase()))) update({ roots: [...settings.roots, parent] });
+      if (!settings.roots.some((r) => folder.toLowerCase().startsWith(r.toLowerCase()))) update({ roots: [...settings.roots, folder] });
       await reload();
       setDone(true);
       toast(`${serverName(name)} is on the server`, "good");

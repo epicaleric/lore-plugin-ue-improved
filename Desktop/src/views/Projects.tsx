@@ -116,7 +116,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
             <CategoryTag project={project} />
           </div>
           <div className="card-meta small" style={{ marginTop: 2 }}>
-            {view.engine ? <span>Unreal {view.engine}</span> : <span className="faint">Engine unknown</span>}
+            {view.engine ? <span>Unreal {view.engine}</span> : <span className="faint">{project.local && !project.local.uproject ? "Not an Unreal project" : "Engine unknown"}</span>}
             {view.bytes > 0 && <><span className="dotsep" /><span>{formatBytes(view.bytes)}</span></>}
             {view.last && (
               <>
@@ -161,7 +161,7 @@ function ListRow({ project, onOpen }: { project: Project; onOpen: () => void }) 
           <div className="card-title">{view.name}</div>
           <CategoryTag project={project} />
         </div>
-        <div className="card-meta small" style={{ marginTop: 2 }}>{view.engine ? `Unreal ${view.engine}` : "Engine unknown"}{view.bytes > 0 ? ` · ${formatBytes(view.bytes)}` : ""}</div>
+        <div className="card-meta small" style={{ marginTop: 2 }}>{view.engine ? `Unreal ${view.engine}` : project.local && !project.local.uproject ? "Not an Unreal project" : "Engine unknown"}{view.bytes > 0 ? ` · ${formatBytes(view.bytes)}` : ""}</div>
       </div>
       <div className="row" style={{ gap: 6 }}><StatusPill project={project} status={view.status} /></div>
       <div className="muted" style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>

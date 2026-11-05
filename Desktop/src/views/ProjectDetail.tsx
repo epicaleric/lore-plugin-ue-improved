@@ -238,7 +238,6 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
 /** Re-links a copy that was moved, or moves it to another folder on the same disk. */
 function useCopyTools(project: Project) {
   const { settings, update, reload, toast } = useStore();
-  const parentOf = (path: string) => path.replace(/[\\/][^\\/]+$/, "");
   const covered = (path: string) => settings.roots.some((root) => path.toLowerCase().startsWith(root.toLowerCase()));
 
   /** Pick the folder of a copy that is somewhere else; its parent is then searched too. */
@@ -248,7 +247,7 @@ function useCopyTools(project: Project) {
     const id = await api.repoId(chosen);
     if (!id) return toast("That folder is not a Lore working copy. Pick the project folder itself (the one that has a .lore folder in it).", "bad");
     if (project.id && id !== project.id) return toast("That folder is a copy of another project.", "bad");
-    if (!covered(chosen)) update({ roots: [...settings.roots, parentOf(chosen)] });
+    if (!covered(chosen)) update({ roots: [...settings.roots, chosen] });
     toast("Found it", "good");
     invalidateStatus();
     await reload();
