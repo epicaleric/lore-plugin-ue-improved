@@ -212,9 +212,9 @@ export function useProjectActions() {
         staged = [];
       };
 
-      const conflicts = (text: string) => [...text.matchAll(/File has local changes:\s*(.+?)\s*\(incoming/g)].map((m) => m[1]);
+      const conflicts = (text: string) => [...text.matchAll(/(?:File has local changes:\s*(.+?)\s*\(incoming|Deleted (?:file is currently modified|directory has modified files) in file system:\s*(\S.*?)\s*$)/gm)].map((m) => m[1] ?? m[2]);
       // The plugin is not project work: its files can always be put back to what the server has.
-      if (!result.ok && conflicts(result.stderr + result.stdout).some((f) => f.startsWith("Plugins/LoreSourceControl/"))) {
+      if (!result.ok && conflicts(result.stderr + result.stdout).some((f) => f.startsWith("Plugins/LoreSourceControl"))) {
         await api.lore(["reset", "Plugins/LoreSourceControl"], path, server.id);
         result = await api.lore(["sync"], path, server.id);
       }

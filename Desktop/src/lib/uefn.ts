@@ -4,6 +4,9 @@ import type { Server, UefnBackup, UefnProject } from "./types";
 
 export const BACKUP_SUFFIX = "-UEFN-backup";
 
+/** A project on the server that is the backup of a UEFN project. Also recognised on a PC without UEFN. */
+export const isUefnBackup = (name: string) => name.endsWith(BACKUP_SUFFIX);
+
 /** Server names stay simple: letters, digits, dots, dashes and underscores. */
 export const serverName = (name: string) => name.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 

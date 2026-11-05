@@ -41,10 +41,13 @@ export async function cachedRemoteInfo(repo: RemoteRepo): Promise<RemoteInfo | n
  */
 export async function loadRemoteInfo(server: Server, repo: RemoteRepo, known: RemoteInfo | null): Promise<RemoteInfo | null> {
   const base = await api.bareDir();
-  const dir = at(base, repo.id);
-
   // A bare clone is tiny and quick to make, so it is made again every time instead of updated (which could fetch files).
-  if (await api.exists(at(dir, ".lore"))) await api.removeCache(dir);
+  // What an earlier run left behind may be half removed or locked, and must not stop this one: if it cannot go, a new folder is used.
+  let dir = at(base, repo.id);
+  if (await api.exists(dir)) {
+    await api.removeCache(dir).catch(() => {});
+    if (await api.exists(dir)) dir = at(base, `${repo.id}-${Date.now()}`);
+  }
   const cloned = await api.lore(["clone", "--bare", `${server.loreUrl}/${repo.name}`, dir], null, server.id);
   if (!cloned.ok) return known;
 

@@ -6,6 +6,7 @@ import { firstLine } from "../lib/parse";
 import { formatBytes, timeAgo } from "../lib/format";
 import { peekRevision, peekStatus, useAuthors, useCacheVersion, useLastRevision, useProjectActions, useStatus } from "../lib/actions";
 import { useStore } from "../lib/store";
+import { BACKUP_SUFFIX, isUefnBackup } from "../lib/uefn";
 import { api } from "../lib/api";
 import type { GroupKey, Project, SortKey } from "../lib/types";
 import { SignInModal } from "../components/Servers";
@@ -21,7 +22,7 @@ export function useProjectView(project: Project) {
   const status = useStatus(project.local?.path, server?.id, 0);
   const localLast = useLastRevision(project.local?.path, 0);
   const last = localLast ?? project.remote?.last ?? project.uefn?.revisions?.[0] ?? null;
-  const name = override?.displayName || project.name;
+  const name = override?.displayName || project.name.replace(BACKUP_SUFFIX, "");
   const engine = override?.engine || project.local?.engine || project.remote?.engine || null;
   const thumbnail = override?.thumbnail || project.local?.thumbnail || project.remote?.thumbnail || project.uefn?.thumbnail || null;
   return { name, engine, thumbnail, status, last, override, bytes: project.remote?.bytes ?? 0 };
@@ -46,7 +47,7 @@ export function StatusPill({ project, status }: { project: Project; status: Retu
 
 /** What the project is made with, for the line under its name. */
 export const madeWith = (project: Project, engine: string | null) =>
-  project.uefn ? `UEFN${project.uefn.version ? ` ${project.uefn.version}` : ""}` : engine ? `Unreal ${engine}` : project.local && !project.local.uproject ? "Not an Unreal project" : "Engine unknown";
+  project.uefn ? `UEFN${project.uefn.version ? ` ${project.uefn.version}` : ""}` : isUefnBackup(project.name) ? "UEFN" : engine ? `Unreal ${engine}` : project.local && !project.local.uproject ? "Not an Unreal project" : "Engine unknown";
 
 /** Small overlapping avatars of everybody who saved a version. */
 export function AuthorStack({ path, fallback }: { path: string | undefined; fallback?: string[] }) {
@@ -109,6 +110,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
         <div className="overlay" />
         <div className="people"><AuthorStack path={project.local?.path} fallback={project.remote?.authors} /></div>
         <div className="badges">
+          {isUefnBackup(project.name) && <Pill tone="accent" title="A backup of a UEFN project, kept on this server">UEFN backup</Pill>}
           <StatusPill project={project} status={view.status} />
           {view.status && view.status.changes > 0 && <Pill tone="muted" title={`${view.status.changes} files on this PC have changes that are not saved as a version yet`}><FilePen size={12} /> {view.status.changes}</Pill>}
           <CategoryTag project={project} />
@@ -228,7 +230,7 @@ export function Projects() {
     return ids;
   }, [category, categories]);
 
-  const engineOf = (p: Project) => (p.uefn ? "UEFN" : (p.id && settings.overrides[p.id]?.engine) || p.local?.engine || p.remote?.engine ? `Unreal ${(p.id && settings.overrides[p.id]?.engine) || p.local?.engine || p.remote?.engine}` : "Unknown");
+  const engineOf = (p: Project) => (p.uefn || isUefnBackup(p.name) ? "UEFN" : (p.id && settings.overrides[p.id]?.engine) || p.local?.engine || p.remote?.engine ? `Unreal ${(p.id && settings.overrides[p.id]?.engine) || p.local?.engine || p.remote?.engine}` : "Unknown");
   const engineNames = [...new Set(projects.map(engineOf))].sort();
 
   const shown = projects.filter((p) => {
@@ -236,7 +238,7 @@ export function Projects() {
     if (filter === "local" && !p.local && !p.uefn) return false;
     if (filter === "remote" && (p.local || p.uefn)) return false;
     if (filter === "unlinked" && (p.onServer || p.uefn)) return false;
-    if (category === "uefn" && !p.uefn) return false;
+    if (category === "uefn" && !p.uefn && !isUefnBackup(p.name)) return false;
     if (engine && engineOf(p) !== engine) return false;
     if (categoryIds) {
       const assigned = p.id ? settings.assignments[p.id] : undefined;

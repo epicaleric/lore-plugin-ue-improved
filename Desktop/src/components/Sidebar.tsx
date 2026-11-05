@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { useProjectActions } from "../lib/actions";
 import { useStore, type View } from "../lib/store";
 import { useUpdates } from "../lib/updates";
+import { isUefnBackup } from "../lib/uefn";
 import { readableOn } from "../lib/format";
 import { CategoryAccessModal, CategoryModal } from "./Categories";
 import { ServerModal, SignInModal } from "./Servers";
@@ -87,7 +88,7 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="brand">
         <Logo size={34} />
-        <div><div className="brand-name">Lore<span className="plus">+</span></div><div className="brand-sub">Projects and people</div></div>
+        <div><div className="brand-name">Lore<span className="plus">+</span></div><div className="brand-sub">Revision Control</div></div>
       </div>
 
       <button
@@ -123,12 +124,12 @@ export function Sidebar() {
         )}
         {roots.map((c) => renderCategory(c, 0))}
         {categories.length === 0 && <div className="faint" style={{ padding: "2px 12px", fontSize: 12.5 }}>Group your projects, for example by product.</div>}
-        {uefns.length > 0 && (
+        {(uefns.length > 0 || projects.some((p) => isUefnBackup(p.name))) && (
           <>
             <div className="nav-group-title"><span>Other editors</span></div>
             <button className={`nav-item ${category === "uefn" && (view === "projects" || view === "project") ? "active" : ""}`} onClick={() => { setCategory("uefn"); go("projects"); }}>
               <span className="cat-row"><Box size={14} />UEFN</span>
-              <span className="count">{projects.filter((p) => p.uefn).length || ""}</span>
+              <span className="count">{projects.filter((p) => p.uefn || isUefnBackup(p.name)).length || ""}</span>
             </button>
           </>
         )}
