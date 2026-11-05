@@ -15,6 +15,7 @@ public class LoreSourceControl : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
 			"ApplicationCore",
+			"AssetRegistry",
 			"CoreUObject",
 			"Engine",
 			"Slate",

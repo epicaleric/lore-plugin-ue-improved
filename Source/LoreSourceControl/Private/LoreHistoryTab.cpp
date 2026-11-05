@@ -3,7 +3,13 @@
 #include "LoreSourceControlLog.h"
 #include "LoreTypes.h"
 
+#include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Misc/App.h"
+#include "Widgets/Input/SComboButton.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Framework/Docking/TabManager.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
@@ -68,6 +74,7 @@ namespace
 		FString Date;
 		FString Description;
 		bool bFilesLoaded = false;
+		bool bExpanded = false;
 		TArray<TSharedPtr<FLoreFileChange>> Files;
 		TWeakPtr<SVerticalBox> BodyBox;
 	};
@@ -607,16 +614,28 @@ namespace
 	}
 }
 
-// ------------------------------------------------------------------------- panel helpers
+// ------------------------------------------------------------------------- design system
 
 namespace
 {
-	const FLinearColor Purple(0.42f, 0.22f, 0.62f, 1.0f);
-	// Brush colors are linear, so these small values display as a dark grey.
-	const FSlateRoundedBoxBrush CardBrush(FLinearColor(0.008f, 0.008f, 0.010f, 1.0f), 6.0f);
-	const FSlateRoundedBoxBrush AvatarBrush(Purple, 14.0f);
-	const FSlateRoundedBoxBrush DotBrush(Purple, 4.0f);
-	const FSlateRoundedBoxBrush HeadBrush(Purple, 10.0f);
+	// Brush colors are linear, so these small values display as dark greys.
+	const FLinearColor Accent(0.42f, 0.22f, 0.62f, 1.0f);
+	const FLinearColor Good(0.25f, 0.78f, 0.40f, 1.0f);
+	const FLinearColor Warn(0.95f, 0.70f, 0.20f, 1.0f);
+	const FLinearColor Bad(0.90f, 0.30f, 0.30f, 1.0f);
+
+	const FSlateRoundedBoxBrush CardBrush(FLinearColor(0.006f, 0.006f, 0.008f, 1.0f), 6.0f);
+	const FSlateRoundedBoxBrush PillBrush(FLinearColor(0.020f, 0.020f, 0.024f, 1.0f), 12.0f);
+	const FSlateRoundedBoxBrush AccentPillBrush(Accent, 9.0f);
+	const FSlateRoundedBoxBrush AvatarBrush(Accent, 14.0f);
+	const FSlateRoundedBoxBrush DotBrush(Accent, 4.0f);
+	const FSlateRoundedBoxBrush HeadBrush(Accent, 10.0f);
+	const FSlateRoundedBoxBrush GoodDotBrush(Good, 5.0f);
+	const FSlateRoundedBoxBrush BadDotBrush(Bad, 5.0f);
+	const FSlateColorBrush StripeA(FLinearColor(0.003f, 0.003f, 0.004f, 1.0f));
+	const FSlateColorBrush StripeB(FLinearColor(0.007f, 0.007f, 0.009f, 1.0f));
+	const FSlateColorBrush HoverBrush(FLinearColor(0.030f, 0.030f, 0.040f, 1.0f));
+	const FSlateColorBrush ErrorBarBrush(FLinearColor(0.45f, 0.0f, 0.0f, 1.0f));
 
 	TSharedRef<SWidget> MakeIcon(const FName& InBrushName, const FLinearColor& InColor, float InSize = 16.0f)
 	{
@@ -629,8 +648,8 @@ namespace
 	TSharedRef<SWidget> MakeStateIcon(const FString& InStatus)
 	{
 		if (InStatus == TEXT("A")) { return MakeIcon("Icons.Plus", FLinearColor(0.25f, 0.6f, 1.0f)); }
-		if (InStatus == TEXT("D")) { return MakeIcon("Icons.Delete", FLinearColor(0.9f, 0.3f, 0.3f)); }
-		return MakeIcon("Icons.Edit", FLinearColor(0.95f, 0.75f, 0.2f));
+		if (InStatus == TEXT("D")) { return MakeIcon("Icons.Delete", Bad); }
+		return MakeIcon("Icons.Edit", Warn);
 	}
 
 	FText StateWord(const FString& InStatus)
@@ -639,6 +658,205 @@ namespace
 		if (InStatus == TEXT("D")) { return LOCTEXT("StateDeleted", "Deleted"); }
 		return LOCTEXT("StateModified", "Modified");
 	}
+
+	/** What kind of asset a path is, with the colour UEFN uses for that kind. */
+	struct FAssetKind
+	{
+		FText Label;
+		FLinearColor Color;
+	};
+
+	FAssetKind ClassifyAsset(const FString& InPath)
+	{
+		const FString Name = FPaths::GetBaseFilename(InPath);
+		const FString Ext = FPaths::GetExtension(InPath).ToLower();
+		if (Ext == TEXT("umap")) { return { LOCTEXT("KindLevel", "Level"), FLinearColor(0.35f, 0.35f, 1.0f) }; }
+		if (InPath.Contains(TEXT("__ExternalActors__"))) { return { LOCTEXT("KindActor", "Level Actor"), FLinearColor(0.45f, 0.55f, 0.95f) }; }
+		if (InPath.Contains(TEXT("__ExternalObjects__"))) { return { LOCTEXT("KindObject", "Level Object"), FLinearColor(0.45f, 0.55f, 0.95f) }; }
+		if (Ext != TEXT("uasset"))
+		{
+			if (Ext == TEXT("dll") || Ext == TEXT("pdb") || Ext == TEXT("exe")) { return { LOCTEXT("KindBinary", "Binary"), FLinearColor(0.6f, 0.45f, 0.35f) }; }
+			if (Ext == TEXT("ini") || Ext == TEXT("uplugin") || Ext == TEXT("uproject") || Ext == TEXT("uefnproject")) { return { LOCTEXT("KindConfig", "Config"), FLinearColor(0.7f, 0.7f, 0.3f) }; }
+			return { LOCTEXT("KindFile", "File"), FLinearColor(0.6f, 0.6f, 0.65f) };
+		}
+		if (Name.StartsWith(TEXT("BP_")) || Name.StartsWith(TEXT("WBP_")) || Name.StartsWith(TEXT("ABP_"))) { return { LOCTEXT("KindBlueprint", "Blueprint Class"), FLinearColor(0.40f, 0.45f, 1.0f) }; }
+		if (Name.StartsWith(TEXT("MF_"))) { return { LOCTEXT("KindMaterialFunction", "Material Function"), FLinearColor(1.0f, 0.60f, 0.10f) }; }
+		if (Name.StartsWith(TEXT("MI_"))) { return { LOCTEXT("KindMaterialInstance", "Material Instance"), FLinearColor(0.35f, 0.65f, 1.0f) }; }
+		if (Name.StartsWith(TEXT("M_"))) { return { LOCTEXT("KindMaterial", "Material"), FLinearColor(0.35f, 0.60f, 1.0f) }; }
+		if (Name.StartsWith(TEXT("NS_"))) { return { LOCTEXT("KindNiagara", "Niagara System"), FLinearColor(0.30f, 0.90f, 0.40f) }; }
+		if (Name.StartsWith(TEXT("T_"))) { return { LOCTEXT("KindTexture", "Texture"), FLinearColor(1.0f, 0.30f, 0.35f) }; }
+		if (Name.StartsWith(TEXT("SM_"))) { return { LOCTEXT("KindStaticMesh", "Static Mesh"), FLinearColor(0.30f, 0.85f, 0.90f) }; }
+		if (Name.StartsWith(TEXT("SK_"))) { return { LOCTEXT("KindSkeletalMesh", "Skeletal Mesh"), FLinearColor(0.30f, 0.85f, 0.90f) }; }
+		return { LOCTEXT("KindAsset", "Asset"), FLinearColor(0.60f, 0.60f, 0.70f) };
+	}
+
+	/** "Content/Foo/Bar.uasset" -> "/Game/Foo/Bar"; empty when the path is not a package. */
+	FString PackageNameFromPath(const FString& InPath)
+	{
+		FString Path = InPath;
+		Path.ReplaceInline(TEXT("\\"), TEXT("/"));
+		const bool bMap = Path.EndsWith(TEXT(".umap"));
+		if (!bMap && !Path.EndsWith(TEXT(".uasset")))
+		{
+			return FString();
+		}
+		Path = Path.LeftChop(bMap ? 5 : 7);
+		if (Path.StartsWith(TEXT("Content/")))
+		{
+			return TEXT("/Game/") + Path.Mid(8);
+		}
+		if (Path.StartsWith(TEXT("Plugins/")))
+		{
+			const int32 ContentIndex = Path.Find(TEXT("/Content/"));
+			if (ContentIndex != INDEX_NONE)
+			{
+				const FString PluginName = FPaths::GetCleanFilename(Path.Left(ContentIndex));
+				return TEXT("/") + PluginName + TEXT("/") + Path.Mid(ContentIndex + 9);
+			}
+		}
+		return FString();
+	}
+
+	/** An asset's readable name and kind. Level actors are stored under hash names, so their label comes from the asset registry. */
+	struct FAssetDisplay
+	{
+		FString Name;
+		FAssetKind Kind;
+	};
+
+	FAssetDisplay DescribeAsset(const FString& InPath)
+	{
+		FAssetDisplay Result;
+		Result.Kind = ClassifyAsset(InPath);
+		Result.Name = FPaths::GetBaseFilename(InPath);
+
+		static TMap<FString, TPair<FString, FString>> Cache; // path -> (label, class); game thread only
+		TPair<FString, FString> Found;
+		if (const TPair<FString, FString>* Cached = Cache.Find(InPath))
+		{
+			Found = *Cached;
+		}
+		else
+		{
+			const FString Package = PackageNameFromPath(InPath);
+			IAssetRegistry* Registry = Package.IsEmpty() ? nullptr : IAssetRegistry::Get();
+			if (Registry)
+			{
+				TArray<FAssetData> Assets;
+				Registry->GetAssetsByPackageName(FName(*Package), Assets, /*bIncludeOnlyOnDiskAssets=*/true);
+				if (!Assets.IsEmpty())
+				{
+					FString Label;
+					if (!Assets[0].GetTagValue(FName(TEXT("ActorLabel")), Label) || Label.IsEmpty())
+					{
+						Label = Assets[0].AssetName.ToString();
+					}
+					Found = TPair<FString, FString>(Label, Assets[0].AssetClassPath.GetAssetName().ToString());
+					Cache.Add(InPath, Found);
+				}
+			}
+		}
+
+		if (!Found.Key.IsEmpty())
+		{
+			Result.Name = Found.Key;
+		}
+		if (InPath.Contains(TEXT("__ExternalActors__")) && !Found.Value.IsEmpty())
+		{
+			Result.Kind.Label = FText::FromString(FName::NameToDisplayString(Found.Value, false));
+			if (Found.Value.Contains(TEXT("StaticMesh"))) { Result.Kind.Color = FLinearColor(0.30f, 0.85f, 0.90f); }
+			else if (Found.Value.Contains(TEXT("Light"))) { Result.Kind.Color = FLinearColor(1.0f, 0.90f, 0.30f); }
+			else if (Found.Value.Contains(TEXT("Blueprint")) || Found.Value.StartsWith(TEXT("BP_"))) { Result.Kind.Color = FLinearColor(0.40f, 0.45f, 1.0f); }
+		}
+		return Result;
+	}
+
+	/** The short coloured dash that marks an asset's kind. */
+	TSharedRef<SWidget> MakeKindDash(const FAssetKind& InKind)
+	{
+		return SNew(SBox).WidthOverride(10.0f).HeightOverride(4.0f)
+			[
+				SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(InKind.Color).Padding(0.0f)
+			];
+	}
+
+	/** Parse "Wed, 4 Nov 2026 21:17:14 +0000" into local time. */
+	bool ParseRevisionDate(const FString& InRaw, FDateTime& OutLocal)
+	{
+		TArray<FString> Tokens;
+		InRaw.ParseIntoArrayWS(Tokens);
+		if (Tokens.Num() < 5)
+		{
+			return false;
+		}
+		static const TCHAR* Months[] = { TEXT("Jan"), TEXT("Feb"), TEXT("Mar"), TEXT("Apr"), TEXT("May"), TEXT("Jun"), TEXT("Jul"), TEXT("Aug"), TEXT("Sep"), TEXT("Oct"), TEXT("Nov"), TEXT("Dec") };
+		int32 Month = 0;
+		for (int32 Index = 0; Index < 12; ++Index)
+		{
+			if (Tokens[2].StartsWith(Months[Index]))
+			{
+				Month = Index + 1;
+			}
+		}
+		TArray<FString> Time;
+		Tokens[4].ParseIntoArray(Time, TEXT(":"));
+		if (Month == 0 || Time.Num() != 3)
+		{
+			return false;
+		}
+		const FDateTime Utc(FCString::Atoi(*Tokens[3]), Month, FCString::Atoi(*Tokens[1]), FCString::Atoi(*Time[0]), FCString::Atoi(*Time[1]), FCString::Atoi(*Time[2]));
+		OutLocal = Utc + (FDateTime::Now() - FDateTime::UtcNow());
+		return true;
+	}
+
+	/** "29 Oct 2026, 17:16", the way UEFN writes it. */
+	FString FormatUefnDate(const FString& InRaw)
+	{
+		FDateTime Local;
+		if (!ParseRevisionDate(InRaw, Local))
+		{
+			return InRaw;
+		}
+		static const TCHAR* Months[] = { TEXT("Jan"), TEXT("Feb"), TEXT("Mar"), TEXT("Apr"), TEXT("May"), TEXT("Jun"), TEXT("Jul"), TEXT("Aug"), TEXT("Sep"), TEXT("Oct"), TEXT("Nov"), TEXT("Dec") };
+		return FString::Printf(TEXT("%d %s %d, %02d:%02d"), Local.GetDay(), Months[Local.GetMonth() - 1], Local.GetYear(), Local.GetHour(), Local.GetMinute());
+	}
+
+	FLinearColor AvatarColorFor(const FString& InName)
+	{
+		const uint32 Hash = GetTypeHash(InName.ToLower());
+		return FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash % 256), 130, 200);
+	}
+
+	/** A round avatar with the author's initial. */
+	TSharedRef<SWidget> MakeAvatar(const FString& InAuthor, float InSize = 24.0f)
+	{
+		const FString Initial = InAuthor.IsEmpty() ? FString(TEXT("?")) : InAuthor.Left(1).ToUpper();
+		return SNew(SBox).WidthOverride(InSize).HeightOverride(InSize)
+			[
+				SNew(SBorder).BorderImage(&AvatarBrush).BorderBackgroundColor(AvatarColorFor(InAuthor)).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(0.0f)
+				[
+					SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(FText::FromString(Initial))
+				]
+			];
+	}
+
+	/** A small rounded count badge, hidden while the count is zero. */
+	TSharedRef<SWidget> MakeBadge(TFunction<int32()> InCount)
+	{
+		return SNew(SBorder).BorderImage(&AccentPillBrush).Padding(FMargin(6.0f, 1.0f))
+			.Visibility_Lambda([InCount]() { return InCount() > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
+			[
+				SNew(STextBlock).Font(FAppStyle::GetFontStyle("SmallFont")).Text_Lambda([InCount]() { return FText::AsNumber(InCount()); })
+			];
+	}
+
+	/** Section heading used inside cards. */
+	TSharedRef<SWidget> MakeCardTitle(const FText& InTitle)
+	{
+		return SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(InTitle);
+	}
+
+	// ------------------------------------------------------------------ data helpers
 
 	bool ParseRevisionNumber(const FString& InLine, const FString& InPrefix, int32& OutNumber)
 	{
@@ -716,24 +934,6 @@ namespace
 		return TEXT("main");
 	}
 
-	FString FileHistoryText(const FString& InPath, FString& OutError)
-	{
-		const FContext Context = LoreSourceControlUtils::GetCommandContextFromModule();
-		TArray<FString> Lines;
-		if (!RunLore(Context, TEXT("file history"), TArray<FString>(), { InPath }, Lines, OutError))
-		{
-			return FString();
-		}
-		TArray<TSharedPtr<FLoreRevisionItem>> Items;
-		ParseHistory(Lines, Items);
-		FString Text = FString::Printf(TEXT("%s\n\n"), *InPath);
-		for (const TSharedPtr<FLoreRevisionItem>& Item : Items)
-		{
-			Text += FString::Printf(TEXT("%d   %s   %s\n      %s\n"), Item->Number, *Item->Author, *FormatDate(Item->Date), *Item->Description);
-		}
-		return Items.IsEmpty() ? FString(TEXT("No history found.")) : Text;
-	}
-
 	/** Release one of our own locks (no forcing, so another user's lock is never touched). */
 	bool UnlockOwn(const FLoreLockInfo& Lock, FString& OutError)
 	{
@@ -759,6 +959,228 @@ namespace
 		RefreshSourceControlStates(Context, TArray<FString>());
 		return true;
 	}
+
+	/** Facts shown on the Server tab. */
+	struct FServerInfo
+	{
+		FString RemoteUrl;
+		FString RepositoryName;
+		FString RepositoryId;
+		FString DefaultBranch;
+		FString Creator;
+		FString Created;
+		FString ClientVersion;
+		FString User;
+		FString TokenExpires;
+		FString LastChecked;
+		bool bReachable = false;
+		bool bHealthKnown = false;
+		int32 LatencyMs = 0;
+		int32 LocalRevision = 0;
+		int32 RemoteRevision = 0;
+	};
+
+	void LoadServerInfo(const FContext& Context, FServerInfo& InOut)
+	{
+		FString Error;
+		TArray<FString> Lines;
+		if (RunLore(Context, TEXT("repository info"), TArray<FString>(), TArray<FString>(), Lines, Error))
+		{
+			for (int32 Index = 0; Index < Lines.Num(); ++Index)
+			{
+				const FString Line = Lines[Index].TrimStartAndEnd();
+				int32 Paren = INDEX_NONE;
+				if (Index == 0 && Line.FindChar(TEXT('('), Paren))
+				{
+					InOut.RepositoryName = Line.Left(Paren).TrimEnd();
+					InOut.RepositoryId = Line.Mid(Paren + 1).Replace(TEXT(")"), TEXT("")).TrimStartAndEnd();
+				}
+				int32 Colon = INDEX_NONE;
+				if (!Line.FindChar(TEXT(':'), Colon))
+				{
+					continue;
+				}
+				const FString Key = Line.Left(Colon).TrimStartAndEnd();
+				const FString Value = Line.Mid(Colon + 1).TrimStartAndEnd();
+				if (Key == TEXT("Remote URL")) { InOut.RemoteUrl = Value; }
+				else if (Key == TEXT("Default branch")) { { int32 Open = Value.Find(TEXT(" (")); InOut.DefaultBranch = Open == INDEX_NONE ? Value : Value.Left(Open); } }
+				else if (Key == TEXT("Creator")) { InOut.Creator = Value; }
+				else if (Key == TEXT("Created")) { InOut.Created = FormatUefnDate(Value); }
+			}
+		}
+
+		FString Version;
+		LoreSourceControlUtils::CheckLoreAvailable(Context.BinaryPath, Version);
+		InOut.ClientVersion = Version.TrimStartAndEnd();
+
+		Lines.Reset();
+		InOut.User = LoreSourceControlUtils::DetectAuthenticatedUser(Context);
+		if (RunLore(Context, TEXT("auth list"), TArray<FString>(), TArray<FString>(), Lines, Error))
+		{
+			for (const FString& Raw : Lines)
+			{
+				const FString Line = Raw.TrimStartAndEnd();
+				if (Line.StartsWith(TEXT("Expires:")) && InOut.TokenExpires.IsEmpty())
+				{
+					InOut.TokenExpires = FormatUefnDate(Line.Mid(8).TrimStartAndEnd());
+				}
+			}
+		}
+		InOut.LastChecked = FDateTime::Now().ToString(TEXT("%H:%M:%S"));
+	}
+}
+
+// ------------------------------------------------------------------------- file history window
+
+class SLoreFileHistory : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SLoreFileHistory) {}
+		SLATE_ARGUMENT(FString, Path)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		const FContext Context = LoreSourceControlUtils::GetCommandContextFromModule();
+		TArray<FString> Lines;
+		FString Error;
+		if (RunLore(Context, TEXT("file history"), TArray<FString>(), { InArgs._Path }, Lines, Error))
+		{
+			ParseHistory(Lines, Items);
+		}
+
+		ChildSlot
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(10.0f, 10.0f, 10.0f, 4.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+				[
+					MakeIcon("Icons.Edit", Warn, 14.0f)
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(FText::FromString(InArgs._Path))
+				]
+			]
+			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(10.0f, 4.0f)
+			[
+				SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(0.0f, 4.0f))
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(10.0f, 2.0f)
+					[
+						MakeRow(LOCTEXT("ColRevision", "Revision"), LOCTEXT("ColDate", "Date Submitted"), LOCTEXT("ColBy", "Submitted By"), LOCTEXT("ColDescription", "Description"), true)
+					]
+					+ SVerticalBox::Slot().FillHeight(1.0f)
+					[
+						SAssignNew(List, SListView<TSharedPtr<FLoreRevisionItem>>)
+						.ListItemsSource(&Items)
+						.OnGenerateRow(this, &SLoreFileHistory::GenerateRow)
+						.OnSelectionChanged(this, &SLoreFileHistory::OnSelected)
+						.SelectionMode(ESelectionMode::Single)
+					]
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(10.0f, 4.0f, 10.0f, 10.0f)
+			[
+				SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(12.0f))
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().FillWidth(1.0f)[ MakeDetail(LOCTEXT("DetRevision", "Revision"), DetailRevision) ]
+						+ SHorizontalBox::Slot().FillWidth(1.0f)[ MakeDetail(LOCTEXT("DetSigned", "Signature"), DetailSignature) ]
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().FillWidth(1.0f)[ MakeDetail(LOCTEXT("DetDate", "Date Submitted"), DetailDate) ]
+						+ SHorizontalBox::Slot().FillWidth(1.0f)[ MakeDetail(LOCTEXT("DetBy", "Submitted By"), DetailBy) ]
+					]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						MakeDetail(LOCTEXT("DetDescription", "Description"), DetailDescription)
+					]
+				]
+			]
+		];
+
+		if (!Items.IsEmpty())
+		{
+			List->SetSelection(Items[0]);
+		}
+	}
+
+private:
+	TSharedRef<SWidget> MakeRow(const FText& InA, const FText& InB, const FText& InC, const FText& InD, bool bHeader) const
+	{
+		const FSlateColor Color = bHeader ? FSlateColor::UseSubduedForeground() : FSlateColor::UseForeground();
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 2.0f)[ SNew(SBox).WidthOverride(80.0f)[ SNew(STextBlock).ColorAndOpacity(Color).Text(InA) ] ]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 2.0f)[ SNew(SBox).WidthOverride(180.0f)[ SNew(STextBlock).ColorAndOpacity(Color).Text(InB) ] ]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 2.0f)[ SNew(SBox).WidthOverride(150.0f)[ SNew(STextBlock).ColorAndOpacity(Color).Text(InC) ] ]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 2.0f)[ SNew(STextBlock).ColorAndOpacity(Color).Text(InD) ];
+	}
+
+	TSharedRef<SWidget> MakeDetail(const FText& InLabel, const FString& InValueRef) const
+	{
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 10.0f, 0.0f)
+			[
+				SNew(SBox).WidthOverride(100.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(InLabel) ]
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f)
+			[
+				SNew(STextBlock).AutoWrapText(true).Text_Lambda([&InValueRef]() { return FText::FromString(InValueRef); })
+			];
+	}
+
+	TSharedRef<ITableRow> GenerateRow(TSharedPtr<FLoreRevisionItem> Item, const TSharedRef<STableViewBase>& OwnerTable)
+	{
+		return SNew(STableRow<TSharedPtr<FLoreRevisionItem>>, OwnerTable)
+			.Padding(FMargin(10.0f, 1.0f))
+			[
+				MakeRow(FText::AsNumber(Item->Number), FText::FromString(FormatUefnDate(Item->Date)), FText::FromString(Item->Author), FText::FromString(Item->Description), false)
+			];
+	}
+
+	void OnSelected(TSharedPtr<FLoreRevisionItem> Item, ESelectInfo::Type)
+	{
+		if (!Item.IsValid())
+		{
+			return;
+		}
+		DetailRevision = FString::FromInt(Item->Number);
+		DetailSignature = Item->Signature.Left(16) + TEXT("...");
+		DetailDate = FormatUefnDate(Item->Date);
+		DetailBy = Item->Author;
+		DetailDescription = Item->Description;
+	}
+
+	TArray<TSharedPtr<FLoreRevisionItem>> Items;
+	TSharedPtr<SListView<TSharedPtr<FLoreRevisionItem>>> List;
+	FString DetailRevision;
+	FString DetailSignature;
+	FString DetailDate;
+	FString DetailBy;
+	FString DetailDescription;
+};
+
+namespace
+{
+	void OpenFileHistoryWindow(const FString& InPath)
+	{
+		const TSharedRef<SWindow> Window = SNew(SWindow)
+			.Title(LOCTEXT("FileHistoryTitle", "File History"))
+			.ClientSize(FVector2D(900.0f, 520.0f))
+			[
+				SNew(SLoreFileHistory).Path(InPath)
+			];
+		FSlateApplication::Get().AddWindow(Window);
+	}
 }
 
 // ------------------------------------------------------------------------- the panel
@@ -776,33 +1198,23 @@ public:
 		ChildSlot
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(6.0f)
+			// Tab bar
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 6.0f, 8.0f, 0.0f)
 			[
 				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 4.0f, 0.0f)
+				+ SHorizontalBox::Slot().AutoWidth()[ MakeTab(LOCTEXT("TabHistory", "History"), 0, nullptr) ]
+				+ SHorizontalBox::Slot().AutoWidth()[ MakeTab(LOCTEXT("TabChanges", "Changes"), 1, [this]() { return Changes.Num(); }) ]
+				+ SHorizontalBox::Slot().AutoWidth()[ MakeTab(LOCTEXT("TabLocks", "Locks"), 2, [this]() { return Locks.Num(); }) ]
+				+ SHorizontalBox::Slot().AutoWidth()[ MakeTab(LOCTEXT("TabServer", "Server"), 3, nullptr) ]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)[ SNew(SSpacer) ]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 4.0f)
 				[
-					MakeTabButton(LOCTEXT("TabHistory", "History"), 0)
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 4.0f, 0.0f)
-				[
-					MakeTabButton(LOCTEXT("TabChanges", "Changes"), 1)
-				]
-				+ SHorizontalBox::Slot().AutoWidth()
-				[
-					MakeTabButton(LOCTEXT("TabLocks", "Locks"), 2)
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f)
-				[
-					SNew(SSpacer)
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(8.0f, 3.0f))
+					SNew(SBorder).BorderImage(&PillBrush).Padding(FMargin(10.0f, 4.0f))
 					[
 						SNew(SHorizontalBox)
 						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 6.0f, 0.0f)
 						[
-							MakeIcon("Icons.Check", FLinearColor(0.35f, 0.8f, 0.45f), 14.0f)
+							MakeIcon("Icons.Check", Good, 14.0f)
 						]
 						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 						[
@@ -810,59 +1222,41 @@ public:
 						]
 					]
 				]
-				+ SHorizontalBox::Slot().AutoWidth()
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 0.0f, 4.0f)
 				[
-					SNew(SButton).OnClicked(this, &SLoreHistoryPanel::OnRefresh).ToolTipText(LOCTEXT("RefreshTip", "Reload revisions, changes and locks"))
+					SNew(SButton).ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("SimpleButton"))
+						.OnClicked(this, &SLoreHistoryPanel::OnRefresh).ToolTipText(LOCTEXT("RefreshTip", "Reload revisions, changes, locks and server info"))
 					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
-						[
-							MakeIcon("Icons.Refresh", FLinearColor::White, 14.0f)
-						]
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-						[
-							SNew(STextBlock).Text(LOCTEXT("Refresh", "Refresh"))
-						]
+						MakeIcon("Icons.Refresh", FLinearColor::White, 16.0f)
 					]
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 4.0f)
+			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 0.0f, 6.0f, 0.0f)
+				SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(0.02f, 0.02f, 0.025f)).Padding(0.0f)
 				[
-					SAssignNew(FilterBox, SEditableTextBox)
-					.HintText(LOCTEXT("FilterHint", "Filter revisions by author, text, date or number"))
-					.OnTextChanged(this, &SLoreHistoryPanel::OnFilterChanged)
-				]
-				+ SHorizontalBox::Slot().AutoWidth()
-				[
-					SNew(SButton).Text(LOCTEXT("ClearFilter", "Clear Filter")).OnClicked(this, &SLoreHistoryPanel::OnClearFilter)
+					SNew(SSpacer).Size(FVector2D(1.0f, 1.0f))
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 6.0f)
+			// Sync banner
+			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+				SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(0.12f, 0.07f, 0.0f)).Padding(FMargin(12.0f, 6.0f))
+				.Visibility_Lambda([this]() { return BehindCount > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
 				[
-					SAssignNew(StatusBlock, STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Visibility_Lambda([this]() { return BehindCount > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
-					.OnClicked(this, &SLoreHistoryPanel::OnSyncLatest)
-					.ToolTipText(LOCTEXT("SyncLatestTip", "Download the newest revisions from the server into your project"))
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
 					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
-						[
-							MakeIcon("Icons.Download", FLinearColor(0.95f, 0.75f, 0.2f), 14.0f)
-						]
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-						[
-							SNew(STextBlock).Text_Lambda([this]() { return FText::Format(LOCTEXT("SyncLatest", "Sync Latest ({0} new)"), FText::AsNumber(BehindCount)); })
-						]
+						MakeIcon("Icons.Download", Warn, 14.0f)
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock).Text_Lambda([this]() { return FText::Format(LOCTEXT("BehindText", "The server has {0} newer revision(s). Your project is not up to date."), FText::AsNumber(BehindCount)); })
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SButton).Text(LOCTEXT("SyncLatestButton", "Sync Latest")).OnClicked(this, &SLoreHistoryPanel::OnSyncLatest)
+							.ToolTipText(LOCTEXT("SyncLatestTip", "Download the newest revisions from the server into your project"))
 					]
 				]
 			]
@@ -870,21 +1264,10 @@ public:
 			[
 				SAssignNew(Switcher, SWidgetSwitcher)
 				.WidgetIndex(0)
-				+ SWidgetSwitcher::Slot()
-				[
-					SAssignNew(HistoryList, SListView<TSharedPtr<FLoreRevisionItem>>)
-					.ListItemsSource(&Filtered)
-					.OnGenerateRow(this, &SLoreHistoryPanel::GenerateRevisionRow)
-					.SelectionMode(ESelectionMode::None)
-				]
-				+ SWidgetSwitcher::Slot()
-				[
-					BuildChangesTab()
-				]
-				+ SWidgetSwitcher::Slot()
-				[
-					BuildLocksTab()
-				]
+				+ SWidgetSwitcher::Slot()[ BuildHistoryTab() ]
+				+ SWidgetSwitcher::Slot()[ BuildChangesTab() ]
+				+ SWidgetSwitcher::Slot()[ BuildLocksTab() ]
+				+ SWidgetSwitcher::Slot()[ BuildServerTab() ]
 			]
 		];
 
@@ -894,18 +1277,45 @@ public:
 private:
 	// ----- chrome
 
-	TSharedRef<SWidget> MakeTabButton(const FText& InLabel, int32 InIndex)
+	TSharedRef<SWidget> MakeTab(const FText& InLabel, int32 InIndex, TFunction<int32()> InBadge)
 	{
+		const TSharedRef<SHorizontalBox> Label = SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(STextBlock).Text(InLabel).Font(FAppStyle::GetFontStyle("BoldFont"))
+					.ColorAndOpacity_Lambda([this, InIndex]() { return ActiveTab == InIndex ? FSlateColor::UseForeground() : FSlateColor::UseSubduedForeground(); })
+			];
+		if (InBadge)
+		{
+			Label->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(6.0f, 0.0f, 0.0f, 0.0f)[ MakeBadge(InBadge) ];
+		}
+
 		return SNew(SButton)
-			.Text(InLabel)
-			.ButtonColorAndOpacity_Lambda([this, InIndex]() { return ActiveTab == InIndex ? Purple : FLinearColor::White; })
-			.OnClicked(this, &SLoreHistoryPanel::OnShowTab, InIndex);
+			.ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("SimpleButton"))
+			.ContentPadding(FMargin(10.0f, 6.0f, 10.0f, 0.0f))
+			.OnClicked(this, &SLoreHistoryPanel::OnShowTab, InIndex)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)[ Label ]
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(SBox).HeightOverride(2.0f)
+					[
+						SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).Padding(0.0f)
+							.BorderBackgroundColor_Lambda([this, InIndex]() { return ActiveTab == InIndex ? Accent : FLinearColor::Transparent; })
+					]
+				]
+			];
 	}
 
 	FReply OnShowTab(int32 InIndex)
 	{
 		ActiveTab = InIndex;
 		Switcher->SetActiveWidgetIndex(InIndex);
+		if (InIndex == 3)
+		{
+			ReloadServer();
+		}
 		return FReply::Handled();
 	}
 
@@ -913,37 +1323,6 @@ private:
 	{
 		Reload();
 		return FReply::Handled();
-	}
-
-	void OnFilterChanged(const FText& InText)
-	{
-		FilterText = InText.ToString().TrimStartAndEnd();
-		ApplyFilter();
-	}
-
-	FReply OnClearFilter()
-	{
-		FilterBox->SetText(FText::GetEmpty());
-		FilterText.Reset();
-		ApplyFilter();
-		return FReply::Handled();
-	}
-
-	void ApplyFilter()
-	{
-		Filtered.Reset();
-		for (const TSharedPtr<FLoreRevisionItem>& Revision : Revisions)
-		{
-			if (FilterText.IsEmpty()
-				|| Revision->Author.Contains(FilterText, ESearchCase::IgnoreCase)
-				|| Revision->Description.Contains(FilterText, ESearchCase::IgnoreCase)
-				|| FormatDate(Revision->Date).Contains(FilterText)
-				|| FString::FromInt(Revision->Number) == FilterText)
-			{
-				Filtered.Add(Revision);
-			}
-		}
-		HistoryList->RequestListRefresh();
 	}
 
 	void Reload()
@@ -977,19 +1356,17 @@ private:
 		FString ChangesError;
 		LoadStatus(Context, Changes, LocalRevision, RemoteRevision, ChangesError);
 		BehindCount = FMath::Max(0, RemoteRevision - LocalRevision);
+		Server.LocalRevision = LocalRevision;
+		Server.RemoteRevision = RemoteRevision;
 
 		BranchBlock->SetText(FText::FromString(GetBranchName(Context)));
-		SetStatus(FString::Printf(TEXT("%d revision(s)  |  %d changed file(s)  |  %d locked file(s)%s"), Revisions.Num(), Changes.Num(), Locks.Num(),
-			Error.IsEmpty() ? TEXT("") : *(TEXT("  |  History error: ") + Error)));
-
 		ApplyFilter();
 		ChangeList->RequestListRefresh();
 		LockList->RequestListRefresh();
-	}
-
-	void SetStatus(const FString& InText)
-	{
-		StatusBlock->SetText(FText::FromString(InText));
+		if (ActiveTab == 3)
+		{
+			ReloadServer();
+		}
 	}
 
 	FReply OnSyncLatest()
@@ -1013,147 +1390,273 @@ private:
 		return FReply::Handled();
 	}
 
-	// ----- history
+	// ----- history tab
+
+	TSharedRef<SWidget> BuildHistoryTab()
+	{
+		return SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 8.0f, 8.0f, 6.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
+				[
+					SNew(SBorder).BorderImage(&PillBrush).Padding(FMargin(10.0f, 5.0f))
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 6.0f, 0.0f)[ MakeIcon("Icons.Lock", FLinearColor(0.7f, 0.7f, 0.8f), 12.0f) ]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[ SNew(STextBlock).Text(FText::FromString(FApp::GetProjectName())) ]
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
+				[
+					SNew(SComboButton)
+					.OnGetMenuContent(this, &SLoreHistoryPanel::BuildDateFilterMenu)
+					.ButtonContent()
+					[
+						SNew(STextBlock).Text_Lambda([this]() { return DateFilterLabel(); })
+					]
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 0.0f, 6.0f, 0.0f)
+				[
+					SAssignNew(FilterBox, SEditableTextBox)
+					.HintText(LOCTEXT("FilterHint", "Filter by author, text or number"))
+					.OnTextChanged(this, &SLoreHistoryPanel::OnFilterChanged)
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SButton).Text(LOCTEXT("ClearFilter", "Clear Filter")).OnClicked(this, &SLoreHistoryPanel::OnClearFilter)
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 2.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(52.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColNo", "No."))
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(36.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColDetails", "Details"))
+				]
+			]
+			+ SVerticalBox::Slot().FillHeight(1.0f)
+			[
+				SAssignNew(HistoryList, SListView<TSharedPtr<FLoreRevisionItem>>)
+				.ListItemsSource(&Filtered)
+				.OnGenerateRow(this, &SLoreHistoryPanel::GenerateRevisionRow)
+				.SelectionMode(ESelectionMode::None)
+			];
+	}
+
+	FText DateFilterLabel() const
+	{
+		switch (DateFilterDays)
+		{
+		case 1: return LOCTEXT("DateToday", "Today");
+		case 7: return LOCTEXT("Date7", "Last 7 days");
+		case 30: return LOCTEXT("Date30", "Last 30 days");
+		default: return LOCTEXT("DateNone", "No date filter");
+		}
+	}
+
+	TSharedRef<SWidget> BuildDateFilterMenu()
+	{
+		FMenuBuilder Menu(true, nullptr);
+		const auto AddEntry = [this, &Menu](const FText& InLabel, int32 InDays)
+		{
+			Menu.AddMenuEntry(InLabel, FText::GetEmpty(), FSlateIcon(), FUIAction(FExecuteAction::CreateLambda([this, InDays]() { DateFilterDays = InDays; ApplyFilter(); })));
+		};
+		AddEntry(LOCTEXT("DateNone", "No date filter"), 0);
+		AddEntry(LOCTEXT("DateToday", "Today"), 1);
+		AddEntry(LOCTEXT("Date7", "Last 7 days"), 7);
+		AddEntry(LOCTEXT("Date30", "Last 30 days"), 30);
+		return Menu.MakeWidget();
+	}
+
+	void OnFilterChanged(const FText& InText)
+	{
+		FilterText = InText.ToString().TrimStartAndEnd();
+		ApplyFilter();
+	}
+
+	FReply OnClearFilter()
+	{
+		FilterBox->SetText(FText::GetEmpty());
+		FilterText.Reset();
+		DateFilterDays = 0;
+		ApplyFilter();
+		return FReply::Handled();
+	}
+
+	void ApplyFilter()
+	{
+		Filtered.Reset();
+		const FDateTime Now = FDateTime::Now();
+		for (const TSharedPtr<FLoreRevisionItem>& Revision : Revisions)
+		{
+			if (DateFilterDays > 0)
+			{
+				FDateTime When;
+				if (ParseRevisionDate(Revision->Date, When) && (Now - When).GetTotalDays() > DateFilterDays)
+				{
+					continue;
+				}
+			}
+			if (FilterText.IsEmpty()
+				|| Revision->Author.Contains(FilterText, ESearchCase::IgnoreCase)
+				|| Revision->Description.Contains(FilterText, ESearchCase::IgnoreCase)
+				|| FormatUefnDate(Revision->Date).Contains(FilterText, ESearchCase::IgnoreCase)
+				|| FString::FromInt(Revision->Number) == FilterText)
+			{
+				Filtered.Add(Revision);
+			}
+		}
+		HistoryList->RequestListRefresh();
+	}
 
 	TSharedRef<ITableRow> GenerateRevisionRow(TSharedPtr<FLoreRevisionItem> Item, const TSharedRef<STableViewBase>& OwnerTable)
 	{
-		const TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
-		Item->BodyBox = Body;
-		if (Item->bFilesLoaded)
-		{
-			PopulateBody(Item);
-		}
-
 		const bool bIsHead = !Revisions.IsEmpty() && Revisions[0] == Item;
-		const FString Initial = Item->Author.IsEmpty() ? FString(TEXT("?")) : Item->Author.Left(1).ToUpper();
+		const bool bExpanded = Item->bExpanded;
+
+		const TSharedRef<SVerticalBox> Content = SNew(SVerticalBox);
+
+		// Header line: avatar, author, description (collapsed) or author only (expanded).
+		Content->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 8.0f, 4.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)[ MakeAvatar(Item->Author) ]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)
+			[
+				SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(FText::FromString(Item->Author))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock).Text(bExpanded ? FText::GetEmpty() : FText::FromString(Item->Description))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(bExpanded ? FText::GetEmpty() : FText::FromString(FormatUefnDate(Item->Date)))
+			]
+		];
+
+		if (bExpanded)
+		{
+			Content->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 8.0f, 8.0f)[ BuildRevisionCard(Item, bIsHead) ];
+		}
 
 		return SNew(STableRow<TSharedPtr<FLoreRevisionItem>>, OwnerTable)
 			.Padding(FMargin(0.0f))
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth()
+				SNew(SBorder).BorderImage(FAppStyle::GetBrush("NoBorder")).Padding(0.0f)
+				.OnMouseButtonDown(this, &SLoreHistoryPanel::OnRevisionClicked, Item)
 				[
-					SNew(SBox).WidthOverride(36.0f)
+					SNew(SHorizontalBox)
+					// Timeline
+					+ SHorizontalBox::Slot().AutoWidth()
 					[
-						SNew(SOverlay)
-						+ SOverlay::Slot().HAlign(HAlign_Center)
+						SNew(SBox).WidthOverride(34.0f)
 						[
-							SNew(SBox).WidthOverride(2.0f)
+							SNew(SOverlay)
+							+ SOverlay::Slot().HAlign(HAlign_Center)
 							[
-								SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(Purple)
+								SNew(SBox).WidthOverride(2.0f)[ SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(Accent) ]
 							]
-						]
-						+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Top).Padding(0.0f, 16.0f, 0.0f, 0.0f)
-						[
-							bIsHead
-								? StaticCastSharedRef<SWidget>(SNew(SBox).WidthOverride(20.0f).HeightOverride(20.0f)
-									[
-										SNew(SOverlay)
-										+ SOverlay::Slot()[ SNew(SBorder).BorderImage(&HeadBrush) ]
-										+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)[ MakeIcon("Icons.Check", FLinearColor::White, 12.0f) ]
-									])
-								: StaticCastSharedRef<SWidget>(SNew(SBox).WidthOverride(8.0f).HeightOverride(8.0f)
-									[
-										SNew(SBorder).BorderImage(&DotBrush)
-									])
-						]
-					]
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 3.0f, 6.0f, 3.0f)
-				[
-					SNew(SExpandableArea)
-					.InitiallyCollapsed(true)
-					.OnAreaExpansionChanged(FOnBooleanValueChanged::CreateSP(this, &SLoreHistoryPanel::OnExpansionChanged, Item))
-					.HeaderContent()
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 2.0f, 10.0f, 2.0f)
-						[
-							SNew(SBox).WidthOverride(28.0f).HeightOverride(28.0f)
+							+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Top).Padding(0.0f, 14.0f, 0.0f, 0.0f)
 							[
-								SNew(SBorder).BorderImage(&AvatarBrush).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(0.0f)
-								[
-									SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(FText::FromString(Initial))
-								]
-							]
-						]
-						+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-						[
-							SNew(SVerticalBox)
-							+ SVerticalBox::Slot().AutoHeight()
-							[
-								SNew(SHorizontalBox)
-								+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
-								[
-									SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(FText::FromString(Item->Author))
-								]
-								+ SHorizontalBox::Slot().AutoWidth()
-								[
-									SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(FText::FromString(FString::Printf(TEXT("#%d"), Item->Number)))
-								]
-							]
-							+ SVerticalBox::Slot().AutoHeight()
-							[
-								SNew(STextBlock).Text(FText::FromString(Item->Description))
-							]
-						]
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f)
-						[
-							SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(FText::FromString(FormatDate(Item->Date)))
-						]
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f)
-						[
-							SNew(SButton)
-							.ToolTipText(LOCTEXT("UndoRevisionTip", "Undo everything this revision changed (creates a new revision)"))
-							.OnClicked(this, &SLoreHistoryPanel::OnUndoRevision, Item)
-							[
-								SNew(STextBlock).Text(LOCTEXT("UndoRevision", "Undo"))
-							]
-						]
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f, 4.0f, 0.0f)
-						[
-							SNew(SButton)
-							.IsEnabled(!bIsHead)
-							.ToolTipText(FText::Format(LOCTEXT("RestoreTip", "Sync your local copy of the project to revision {0}"), FText::AsNumber(Item->Number)))
-							.OnClicked(this, &SLoreHistoryPanel::OnRestoreToRevision, Item)
-							[
-								MakeIcon("Icons.Download", bIsHead ? FLinearColor(0.4f, 0.4f, 0.4f) : FLinearColor(0.55f, 0.9f, 0.3f), 16.0f)
+								bIsHead
+									? StaticCastSharedRef<SWidget>(SNew(SBox).WidthOverride(20.0f).HeightOverride(20.0f)
+										[
+											SNew(SOverlay)
+											+ SOverlay::Slot()[ SNew(SBorder).BorderImage(&HeadBrush) ]
+											+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)[ MakeIcon("Icons.Check", FLinearColor::White, 12.0f) ]
+										])
+									: StaticCastSharedRef<SWidget>(SNew(SBox).WidthOverride(8.0f).HeightOverride(8.0f)[ SNew(SBorder).BorderImage(&DotBrush) ])
 							]
 						]
 					]
-					.BodyContent()
+					// Arrow and number
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 10.0f, 0.0f, 0.0f)
 					[
-						Body
+						SNew(SBox).WidthOverride(64.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 6.0f, 0.0f)
+							[
+								SNew(SImage).Image(FAppStyle::GetBrush(bExpanded ? "TreeArrow_Expanded" : "TreeArrow_Collapsed")).ColorAndOpacity(FSlateColor::UseSubduedForeground())
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[
+								SNew(STextBlock).Text(FText::AsNumber(Item->Number))
+							]
+						]
 					]
+					+ SHorizontalBox::Slot().FillWidth(1.0f)[ Content ]
 				]
 			];
 	}
 
-	void OnExpansionChanged(bool bExpanded, TSharedPtr<FLoreRevisionItem> Item)
+	FReply OnRevisionClicked(const FGeometry&, const FPointerEvent& InMouseEvent, TSharedPtr<FLoreRevisionItem> Item)
 	{
-		if (bExpanded && !Item->bFilesLoaded)
+		if (InMouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+		{
+			return FReply::Unhandled();
+		}
+		Item->bExpanded = !Item->bExpanded;
+		if (Item->bExpanded && !Item->bFilesLoaded)
 		{
 			LoadRevisionFiles(LoreSourceControlUtils::GetCommandContextFromModule(), *Item);
-			PopulateBody(Item);
 		}
+		HistoryList->RebuildList();
+		return FReply::Handled();
 	}
 
-	void PopulateBody(const TSharedPtr<FLoreRevisionItem>& Item)
+	TSharedRef<SWidget> BuildRevisionCard(const TSharedPtr<FLoreRevisionItem>& Item, bool bIsHead)
 	{
-		const TSharedPtr<SVerticalBox> Body = Item->BodyBox.Pin();
-		if (!Body.IsValid())
+		int32 Added = 0;
+		int32 Modified = 0;
+		int32 Deleted = 0;
+		for (const TSharedPtr<FLoreFileChange>& File : Item->Files)
 		{
-			return;
+			if (File->Status == TEXT("A")) { ++Added; }
+			else if (File->Status == TEXT("D")) { ++Deleted; }
+			else { ++Modified; }
 		}
-		Body->ClearChildren();
+		const FText Breakdown = FText::Format(LOCTEXT("Breakdown", "{0} Modified   |   {1} Added   |   {2} Deleted"), FText::AsNumber(Modified), FText::AsNumber(Added), FText::AsNumber(Deleted));
 
 		const TSharedRef<SVerticalBox> Card = SNew(SVerticalBox);
 		Card->AddSlot().AutoHeight()
 		[
-			SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				.Text(FText::Format(LOCTEXT("CardDetails", "{0}   |   {1} file(s)"), FText::FromString(FormatDate(Item->Date)), FText::AsNumber(Item->Files.Num())))
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 12.0f, 0.0f)
+				[
+					SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(FText::FromString(FormatUefnDate(Item->Date)))
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SHorizontalBox).ToolTipText(Breakdown)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 5.0f, 0.0f)[ MakeIcon("Icons.Edit", FLinearColor(0.7f, 0.7f, 0.75f), 12.0f) ]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(FText::Format(LOCTEXT("FileCount", "{0} file(s)"), FText::AsNumber(Item->Files.Num())))
+					]
+				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f, 0.0f)
+			[
+				SNew(SButton).ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("SimpleButton"))
+					.IsEnabled(!bIsHead)
+					.ToolTipText(FText::Format(LOCTEXT("RestoreTip", "Sync your local copy of the project to revision {0}"), FText::AsNumber(Item->Number)))
+					.OnClicked(this, &SLoreHistoryPanel::OnRestoreToRevision, Item)
+				[
+					MakeIcon("Icons.Download", bIsHead ? FLinearColor(0.35f, 0.35f, 0.35f) : FLinearColor(0.65f, 0.95f, 0.25f), 18.0f)
+				]
+			]
 		];
-		Card->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 8.0f)
+		Card->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 10.0f)
 		[
 			SNew(STextBlock).AutoWrapText(true).Text(FText::FromString(Item->Description))
 		];
@@ -1167,52 +1670,44 @@ private:
 		}
 		else
 		{
-			Card->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 2.0f)
+			Card->AddSlot().AutoHeight()
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(24.0f, 0.0f)
+				SNew(SBorder).BorderImage(&StripeB).Padding(FMargin(10.0f, 4.0f))
 				[
-					SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColAsset", "Asset"))
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColState", "State"))
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColAsset", "Asset")) ]
+					+ SHorizontalBox::Slot().AutoWidth()[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColState", "State")) ]
 				]
 			];
 		}
 
+		int32 RowIndex = 0;
 		for (const TSharedPtr<FLoreFileChange>& File : Item->Files)
 		{
+			const FAssetDisplay Display = DescribeAsset(File->Path);
+		const FAssetKind& Kind = Display.Kind;
+			const bool bOdd = (RowIndex++ % 2) == 1;
+			TSharedPtr<SBorder> RowBorder;
 			Card->AddSlot().AutoHeight()
 			[
-				SNew(SBorder).BorderImage(FAppStyle::GetBrush("NoBorder")).Padding(FMargin(2.0f, 3.0f))
-				.ToolTipText(FText::FromString(File->Path + TEXT("\n(right-click for more)")))
+				SAssignNew(RowBorder, SBorder)
+				.BorderImage_Lambda([bOdd]() { return bOdd ? &StripeB : &StripeA; })
+				.Padding(FMargin(10.0f, 4.0f))
+				.ToolTipText(FText::Format(LOCTEXT("AssetTip", "{0}\n{1}"), Kind.Label, FText::FromString(File->Path)))
 				.OnMouseButtonUp(this, &SLoreHistoryPanel::OnFileRowMouseUp, Item, File)
 				[
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
-					[
-						MakeStateIcon(File->Status)
-					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)[ MakeKindDash(Kind) ]
 					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 					[
-						SNew(STextBlock).Text(FText::FromString(FPaths::GetCleanFilename(File->Path)))
+						SNew(STextBlock).Text(FText::FromString(Display.Name))
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f)
-					[
-						SNew(STextBlock).ColorAndOpacity(StatusColor(File->Status)).Text(StateWord(File->Status))
-					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)[ MakeStateIcon(File->Status) ]
 				]
 			];
 		}
 
-		Body->AddSlot().AutoHeight().Padding(4.0f, 2.0f, 4.0f, 6.0f)
-		[
-			SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(12.0f))
-			[
-				Card
-			]
-		];
+		return SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(14.0f, 10.0f))[ Card ];
 	}
 
 	FReply OnFileRowMouseUp(const FGeometry&, const FPointerEvent& InMouseEvent, TSharedPtr<FLoreRevisionItem> Item, TSharedPtr<FLoreFileChange> File)
@@ -1225,6 +1720,10 @@ private:
 		FMenuBuilder Menu(true, nullptr);
 		Menu.AddMenuEntry(LOCTEXT("MenuHistory", "History"), LOCTEXT("MenuHistoryTip", "Show every revision that changed this file"), FSlateIcon(),
 			FUIAction(FExecuteAction::CreateSP(this, &SLoreHistoryPanel::ShowFileHistory, File->Path)));
+		Menu.AddMenuEntry(LOCTEXT("MenuDiffPrev", "Diff Against Previous Revision"), LOCTEXT("MenuDiffPrevTip", "Not available yet for Lore assets"), FSlateIcon(),
+			FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([]() { return false; })));
+		Menu.AddMenuEntry(LOCTEXT("MenuDiffWorkspace", "Diff Against Workspace"), LOCTEXT("MenuDiffWorkspaceTip", "Not available yet for Lore assets"), FSlateIcon(),
+			FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([]() { return false; })));
 		Menu.AddMenuEntry(LOCTEXT("MenuUndoFile", "Undo this change"), LOCTEXT("MenuUndoFileTip", "Put this file back to how it was before this revision (creates a new revision)"), FSlateIcon(),
 			FUIAction(FExecuteAction::CreateSP(this, &SLoreHistoryPanel::RunUndo, Item, TArray<FString>({ File->Path }))));
 		Menu.AddMenuEntry(LOCTEXT("MenuCopyPath", "Copy path"), LOCTEXT("MenuCopyPathTip", "Copy the file path to the clipboard"), FSlateIcon(),
@@ -1237,9 +1736,7 @@ private:
 
 	void ShowFileHistory(FString InPath)
 	{
-		FString Error;
-		const FString Text = FileHistoryText(InPath, Error);
-		Notify(Text.IsEmpty() ? FText::Format(LOCTEXT("FileHistoryFailed", "Could not read the history:\n{0}"), FText::FromString(Error)) : FText::FromString(Text));
+		OpenFileHistoryWindow(InPath);
 	}
 
 	void CopyPath(FString InPath)
@@ -1303,36 +1800,105 @@ private:
 		return FReply::Handled();
 	}
 
-	// ----- changes (check-in)
+	// ----- changes tab (check-in)
 
 	TSharedRef<SWidget> BuildChangesTab()
 	{
 		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 4.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 10.0f, 12.0f, 4.0f)
 			[
 				SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(LOCTEXT("DescriptionLabel", "Changelist Description"))
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f)
 			[
-				SNew(SBox).MinDesiredHeight(90.0f)
+				SNew(SBox).MinDesiredHeight(110.0f)
 				[
-					SAssignNew(DescriptionBox, SMultiLineEditableTextBox)
-					.HintText(LOCTEXT("DescriptionHint", "What did you change? Or press Generate."))
-					.AutoWrapText(true)
+					SNew(SOverlay)
+					+ SOverlay::Slot()
+					[
+						SAssignNew(DescriptionBox, SMultiLineEditableTextBox)
+						.HintText(LOCTEXT("DescriptionHint", "Describe your changes, or click the AI chip to write it for you."))
+						.AutoWrapText(true)
+					]
+					+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Bottom).Padding(0.0f, 0.0f, 8.0f, 6.0f)
+					[
+						SNew(SButton).ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("SimpleButton"))
+							.ToolTipText(LOCTEXT("GenerateTip", "Write the description with Gemini, from the names of the selected files"))
+							.OnClicked(this, &SLoreHistoryPanel::OnGenerate)
+						[
+							SNew(SBorder).BorderImage(&AccentPillBrush).Padding(FMargin(8.0f, 2.0f))
+							[
+								SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont"))
+									.Text_Lambda([this]() { return bGenerating ? LOCTEXT("AiBusy", "AI ...") : LOCTEXT("AiChip", "AI"); })
+							]
+						]
+					]
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 6.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 4.0f, 12.0f, 0.0f)
+			[
+				SAssignNew(GenerateStatus, STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			]
+			// Validation bar, like UEFN's Confirm Submit.
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f, 12.0f, 0.0f)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(SBorder).BorderImage(&ErrorBarBrush).Padding(FMargin(8.0f, 4.0f)).HAlign(HAlign_Center)
+					.Visibility_Lambda([this]() { return DescriptionBox->GetText().IsEmptyOrWhitespace() ? EVisibility::Visible : EVisibility::Collapsed; })
+					[
+						SNew(STextBlock).Text(LOCTEXT("DescriptionRequired", "Description is required to submit"))
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+				[
+					SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(10.0f, 6.0f))
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)[ MakeIcon("Icons.Check", Good, 16.0f) ]
+						+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+						[
+							SNew(STextBlock).Text_Lambda([this]() { return FText::Format(LOCTEXT("SelectedCount", "{0} of {1} file(s) selected"), FText::AsNumber(SelectedChangePaths().Num()), FText::AsNumber(Changes.Num())); })
+						]
+					]
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f, 12.0f, 2.0f)
+			[
+				SNew(SBorder).BorderImage(&StripeB).Padding(FMargin(8.0f, 4.0f))
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)
+					[
+						SNew(SCheckBox)
+						.IsChecked_Lambda([this]() { return AllSelected() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+						.OnCheckStateChanged_Lambda([this](ECheckBoxState InState)
+						{
+							for (const TSharedPtr<FLoreLocalChange>& Change : Changes)
+							{
+								Change->bSelected = (InState == ECheckBoxState::Checked);
+							}
+						})
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(26.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColAsset", "Asset"))
+					]
+					+ SHorizontalBox::Slot().AutoWidth()[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColState", "State")) ]
+				]
+			]
+			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(12.0f, 0.0f)
+			[
+				SAssignNew(ChangeList, SListView<TSharedPtr<FLoreLocalChange>>)
+				.ListItemsSource(&Changes)
+				.OnGenerateRow(this, &SLoreHistoryPanel::GenerateChangeRow)
+				.SelectionMode(ESelectionMode::None)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f)
 			[
 				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SButton).Text(LOCTEXT("Generate", "Generate with Gemini")).OnClicked(this, &SLoreHistoryPanel::OnGenerate)
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					SAssignNew(GenerateStatus, STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 				[
 					SNew(SCheckBox)
 					.IsChecked_Lambda([this]() { return bKeepLocked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
@@ -1341,45 +1907,19 @@ private:
 						SNew(STextBlock).Text(LOCTEXT("KeepLocked", "Keep Files Checked Out"))
 					]
 				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)[ SNew(SSpacer) ]
 				+ SHorizontalBox::Slot().AutoWidth()
 				[
-					SNew(SButton).Text(LOCTEXT("Submit", "Submit"))
+					SNew(SButton).ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("PrimaryButton"))
 						.IsEnabled(this, &SLoreHistoryPanel::CanSubmit)
 						.OnClicked(this, &SLoreHistoryPanel::OnSubmit)
+						.ContentPadding(FMargin(24.0f, 4.0f))
+					[
+						SNew(STextBlock).Text(LOCTEXT("Submit", "Submit"))
+					]
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 2.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(SCheckBox)
-					.IsChecked_Lambda([this]() { return AllSelected() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-					.OnCheckStateChanged_Lambda([this](ECheckBoxState InState)
-					{
-						for (const TSharedPtr<FLoreLocalChange>& Change : Changes)
-						{
-							Change->bSelected = (InState == ECheckBoxState::Checked);
-						}
-					})
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(24.0f, 0.0f)
-				[
-					SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColAsset", "Asset"))
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColState", "State"))
-				]
-			]
-			+ SVerticalBox::Slot().FillHeight(1.0f)
-			[
-				SAssignNew(ChangeList, SListView<TSharedPtr<FLoreLocalChange>>)
-				.ListItemsSource(&Changes)
-				.OnGenerateRow(this, &SLoreHistoryPanel::GenerateChangeRow)
-				.SelectionMode(ESelectionMode::None)
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 6.0f, 8.0f, 2.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f, 12.0f, 8.0f)
 			[
 				SNew(SExpandableArea)
 				.InitiallyCollapsed(true)
@@ -1390,7 +1930,7 @@ private:
 					+ SVerticalBox::Slot().AutoHeight().Padding(4.0f)
 					[
 						SNew(STextBlock).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())
-							.Text(LOCTEXT("AiPrivacy", "Generate sends only the file names and change types, plus the last few descriptions, to Google. On the free tier Google may use prompts to improve its products. The key is saved in this project's Saved/Config folder, not in the repository."))
+							.Text(LOCTEXT("AiPrivacy", "The AI chip sends only the file names and change types, plus the last few descriptions, to Google. On the free tier Google may use prompts to improve its products. The key is saved in this project's Saved/Config folder, not in the repository."))
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(4.0f)
 					[
@@ -1464,36 +2004,29 @@ private:
 
 	TSharedRef<ITableRow> GenerateChangeRow(TSharedPtr<FLoreLocalChange> Change, const TSharedRef<STableViewBase>& OwnerTable)
 	{
+		const FAssetDisplay Display = DescribeAsset(Change->Path);
+		const FAssetKind& Kind = Display.Kind;
 		return SNew(STableRow<TSharedPtr<FLoreLocalChange>>, OwnerTable)
-			.Padding(FMargin(8.0f, 2.0f))
+			.Padding(FMargin(0.0f, 1.0f))
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+				SNew(SBorder).BorderImage(&StripeA).Padding(FMargin(8.0f, 5.0f))
+				.ToolTipText(FText::Format(LOCTEXT("AssetTip", "{0}\n{1}"), Kind.Label, FText::FromString(Change->Path)))
 				[
-					SNew(SCheckBox)
-					.IsChecked_Lambda([Change]() { return Change->bSelected ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-					.OnCheckStateChanged_Lambda([Change](ECheckBoxState InState) { Change->bSelected = (InState == ECheckBoxState::Checked); })
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				[
-					MakeStateIcon(Change->Status)
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					SNew(SVerticalBox)
-					.ToolTipText(FText::FromString(Change->Path))
-					+ SVerticalBox::Slot().AutoHeight()
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)
 					[
-						SNew(STextBlock).Text(FText::FromString(FPaths::GetCleanFilename(Change->Path)))
+						SNew(SCheckBox)
+						.IsChecked_Lambda([Change]() { return Change->bSelected ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+						.OnCheckStateChanged_Lambda([Change](ECheckBoxState InState) { Change->bSelected = (InState == ECheckBoxState::Checked); })
 					]
-					+ SVerticalBox::Slot().AutoHeight()
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)[ MakeKindDash(Kind) ]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 					[
-						SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(FText::FromString(FPaths::GetPath(Change->Path)))
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight()[ SNew(STextBlock).Text(FText::FromString(Display.Name)) ]
+						+ SVerticalBox::Slot().AutoHeight()[ SNew(STextBlock).Font(FAppStyle::GetFontStyle("SmallFont")).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(FText::FromString(FPaths::GetPath(Change->Path))) ]
 					]
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f)
-				[
-					SNew(STextBlock).ColorAndOpacity(StatusColor(Change->Status)).Text(StateWord(Change->Status))
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f)[ MakeStateIcon(Change->Status) ]
 				]
 			];
 	}
@@ -1692,25 +2225,34 @@ private:
 		GenerateStatus->SetText(LOCTEXT("GenerateDone", "Generated. Edit it if you like, then Submit."));
 	}
 
-	// ----- locks
+	// ----- locks tab
 
 	TSharedRef<SWidget> BuildLocksTab()
 	{
 		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 6.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 10.0f, 12.0f, 8.0f)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 				[
-					SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					SNew(STextBlock).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())
 						.Text(LOCTEXT("LocksHelp", "Files checked out (locked) by you or by others. A locked file cannot be changed by anyone else."))
 				]
-				+ SHorizontalBox::Slot().AutoWidth()
+				+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f)
 				[
 					SNew(SButton).Text(LOCTEXT("UnlockAllMine", "Unlock all mine")).OnClicked(this, &SLoreHistoryPanel::OnUnlockAllMine)
 				]
 			]
-			+ SVerticalBox::Slot().FillHeight(1.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f, 12.0f, 2.0f)
+			[
+				SNew(SBorder).BorderImage(&StripeB).Padding(FMargin(8.0f, 4.0f))
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(34.0f, 0.0f, 0.0f, 0.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColAsset", "Asset")) ]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 90.0f, 0.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColCheckedOutBy", "Checked out by")) ]
+				]
+			]
+			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(12.0f, 0.0f)
 			[
 				SAssignNew(LockList, SListView<TSharedPtr<FLoreLockInfo>>)
 				.ListItemsSource(&Locks)
@@ -1729,34 +2271,33 @@ private:
 	TSharedRef<ITableRow> GenerateLockRow(TSharedPtr<FLoreLockInfo> Lock, const TSharedRef<STableViewBase>& OwnerTable)
 	{
 		const bool bMine = IsMine(*Lock);
+		const FAssetDisplay Display = DescribeAsset(Lock->Path);
+		const FAssetKind& Kind = Display.Kind;
 		return SNew(STableRow<TSharedPtr<FLoreLockInfo>>, OwnerTable)
-			.Padding(FMargin(8.0f, 3.0f))
+			.Padding(FMargin(0.0f, 1.0f))
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+				SNew(SBorder).BorderImage(&StripeA).Padding(FMargin(8.0f, 5.0f))
+				.ToolTipText(FText::Format(LOCTEXT("AssetTip", "{0}\n{1}"), Kind.Label, FText::FromString(Lock->Path)))
 				[
-					MakeIcon("Icons.Lock", bMine ? FLinearColor(0.35f, 0.8f, 0.45f) : FLinearColor(0.95f, 0.55f, 0.2f))
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					SNew(SVerticalBox)
-					.ToolTipText(FText::FromString(Lock->Path))
-					+ SVerticalBox::Slot().AutoHeight()
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)[ MakeIcon("Icons.Lock", bMine ? Good : Warn) ]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)[ MakeKindDash(Kind) ]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 					[
-						SNew(STextBlock).Text(FText::FromString(FPaths::GetCleanFilename(Lock->Path)))
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight()[ SNew(STextBlock).Text(FText::FromString(Display.Name)) ]
+						+ SVerticalBox::Slot().AutoHeight()[ SNew(STextBlock).Font(FAppStyle::GetFontStyle("SmallFont")).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(FText::FromString(FPaths::GetPath(Lock->Path))) ]
 					]
-					+ SVerticalBox::Slot().AutoHeight()
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f)
 					[
-						SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(FText::FromString(FPaths::GetPath(Lock->Path)))
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)[ MakeAvatar(Lock->Owner, 20.0f) ]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[ SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(FText::FromString(Lock->Owner)) ]
 					]
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f)
-				[
-					SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(FText::Format(LOCTEXT("CheckedOutBy", "Checked out by {0}"), FText::FromString(Lock->Owner)))
-				]
-				+ SHorizontalBox::Slot().AutoWidth()
-				[
-					SNew(SButton).Text(LOCTEXT("Unlock", "Unlock")).OnClicked(this, &SLoreHistoryPanel::OnUnlock, Lock)
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SButton).Text(LOCTEXT("Unlock", "Unlock")).OnClicked(this, &SLoreHistoryPanel::OnUnlock, Lock)
+					]
 				]
 			];
 	}
@@ -1775,6 +2316,7 @@ private:
 		}
 		else
 		{
+			LoreSourceControlUtils::ForgetRememberedLock(Lock->Path);
 			RefreshSourceControlStates(LoreSourceControlUtils::GetCommandContextFromModule(), { Lock->Path });
 		}
 		Reload();
@@ -1792,6 +2334,7 @@ private:
 				FString Error;
 				if (UnlockOwn(*Lock, Error))
 				{
+					LoreSourceControlUtils::ForgetRememberedLock(Lock->Path);
 					++Released;
 				}
 				else
@@ -1805,6 +2348,123 @@ private:
 		return FReply::Handled();
 	}
 
+	// ----- server tab
+
+	TSharedRef<SWidget> MakeInfoRow(const FText& InLabel, TFunction<FText()> InValue)
+	{
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 3.0f, 12.0f, 3.0f)
+			[
+				SNew(SBox).WidthOverride(130.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(InLabel) ]
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 3.0f)
+			[
+				SNew(STextBlock).AutoWrapText(true).Text_Lambda([InValue]() { return InValue(); })
+			];
+	}
+
+	TSharedRef<SWidget> MakeInfoCard(const FText& InTitle, const TSharedRef<SWidget>& InBody)
+	{
+		return SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(14.0f, 10.0f))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)[ MakeCardTitle(InTitle) ]
+				+ SVerticalBox::Slot().AutoHeight()[ InBody ]
+			];
+	}
+
+	TSharedRef<SWidget> BuildServerTab()
+	{
+		const auto Str = [](const FString& InValue) { return InValue.IsEmpty() ? FText::FromString(TEXT("-")) : FText::FromString(InValue); };
+
+		return SNew(SScrollBox)
+			+ SScrollBox::Slot().Padding(12.0f, 10.0f, 12.0f, 4.0f)
+			[
+				MakeInfoCard(LOCTEXT("CardConnection", "Connection"),
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 6.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SBox).WidthOverride(10.0f).HeightOverride(10.0f)
+							[
+								SNew(SBorder).BorderImage_Lambda([this]() { return Server.bReachable ? &GoodDotBrush : &BadDotBrush; })
+							]
+						]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+						[
+							SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont"))
+								.Text_Lambda([this]() { return !Server.bHealthKnown ? LOCTEXT("ServerChecking", "Checking...") : Server.bReachable ? FText::Format(LOCTEXT("ServerOnline", "Online ({0} ms)"), FText::AsNumber(Server.LatencyMs)) : LOCTEXT("ServerOffline", "Not reachable"); })
+						]
+					]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowUrl", "Server"), [this, Str]() { return Str(Server.RemoteUrl); }) ]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowChecked", "Last checked"), [this, Str]() { return Str(Server.LastChecked); }) ])
+			]
+			+ SScrollBox::Slot().Padding(12.0f, 4.0f)
+			[
+				MakeInfoCard(LOCTEXT("CardRepository", "Repository"),
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowName", "Name"), [this, Str]() { return Str(Server.RepositoryName); }) ]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowId", "Id"), [this, Str]() { return Str(Server.RepositoryId); }) ]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowBranch", "Default branch"), [this, Str]() { return Str(Server.DefaultBranch); }) ]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowCreator", "Created by"), [this, Str]() { return Str(Server.Creator); }) ]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowCreated", "Created"), [this, Str]() { return Str(Server.Created); }) ]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowRevisions", "Revisions"), [this]() { return FText::Format(LOCTEXT("RevisionsValue", "Local {0}  |  Server {1}"), FText::AsNumber(Server.LocalRevision), FText::AsNumber(Server.RemoteRevision)); }) ])
+			]
+			+ SScrollBox::Slot().Padding(12.0f, 4.0f)
+			[
+				MakeInfoCard(LOCTEXT("CardAccount", "Account"),
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowUser", "Signed in as"), [this, Str]() { return Str(Server.User); }) ]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowExpires", "Login valid until"), [this, Str]() { return Str(Server.TokenExpires); }) ]
+					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowClient", "Lore client"), [this, Str]() { return Str(Server.ClientVersion); }) ])
+			]
+			+ SScrollBox::Slot().Padding(12.0f, 4.0f, 12.0f, 12.0f)
+			[
+				MakeInfoCard(LOCTEXT("CardLocks", "About locks"),
+					SNew(STextBlock).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())
+						.Text(LOCTEXT("LocksNote", "The Lore server keeps locks in memory, so they are lost when the server restarts. This plugin remembers your own locks and takes them back for files you are still editing."))
+				)
+			];
+	}
+
+	void ReloadServer()
+	{
+		LoadServerInfo(LoreSourceControlUtils::GetCommandContextFromModule(), Server);
+
+		// Health check on the server's HTTP port (41339) to see if it is up and how fast it answers.
+		FString Host = Server.RemoteUrl;
+		Host.RemoveFromStart(TEXT("lores://"));
+		Host.RemoveFromStart(TEXT("lore://"));
+		int32 Colon = INDEX_NONE;
+		if (Host.FindChar(TEXT(':'), Colon))
+		{
+			Host = Host.Left(Colon);
+		}
+		Server.bHealthKnown = false;
+		if (Host.IsEmpty())
+		{
+			Server.bHealthKnown = true;
+			Server.bReachable = false;
+			return;
+		}
+		HealthStarted = FPlatformTime::Seconds();
+		const TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+		Request->SetURL(FString::Printf(TEXT("http://%s:41339/health_check"), *Host));
+		Request->SetVerb(TEXT("GET"));
+		Request->SetTimeout(5.0f);
+		Request->OnProcessRequestComplete().BindSP(this, &SLoreHistoryPanel::OnHealth);
+		Request->ProcessRequest();
+	}
+
+	void OnHealth(FHttpRequestPtr, FHttpResponsePtr InResponse, bool bSucceeded)
+	{
+		Server.bHealthKnown = true;
+		Server.bReachable = bSucceeded && InResponse.IsValid() && InResponse->GetResponseCode() == 200;
+		Server.LatencyMs = static_cast<int32>((FPlatformTime::Seconds() - HealthStarted) * 1000.0);
+	}
+
 private:
 	TArray<TSharedPtr<FLoreRevisionItem>> Revisions;
 	TArray<TSharedPtr<FLoreRevisionItem>> Filtered;
@@ -1815,7 +2475,6 @@ private:
 	TSharedPtr<SListView<TSharedPtr<FLoreLocalChange>>> ChangeList;
 	TSharedPtr<SListView<TSharedPtr<FLoreLockInfo>>> LockList;
 	TSharedPtr<SWidgetSwitcher> Switcher;
-	TSharedPtr<STextBlock> StatusBlock;
 	TSharedPtr<STextBlock> BranchBlock;
 	TSharedPtr<SEditableTextBox> FilterBox;
 
@@ -1824,13 +2483,17 @@ private:
 	TSharedPtr<SEditableTextBox> ApiKeyBox;
 	TSharedPtr<SEditableTextBox> ModelBox;
 
+	FServerInfo Server;
+	double HealthStarted = 0.0;
 	FString FilterText;
 	FString Language = TEXT("en");
 	int32 ActiveTab = 0;
 	int32 BehindCount = 0;
+	int32 DateFilterDays = 0;
 	bool bGenerating = false;
 	bool bKeepLocked = false;
 };
+
 
 // ------------------------------------------------------------------------- registration
 

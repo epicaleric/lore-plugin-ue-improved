@@ -86,6 +86,15 @@ namespace LoreSourceControlUtils
 	 */
 	FString DetectAuthenticatedUser(const FLoreCommandContext& InContext);
 
+	/**
+	 * The user's own locks, remembered in Saved/Lore/MyLocks.txt. The Lore server keeps locks in
+	 * memory only, so a server restart wipes them; the plugin uses this list to take back the
+	 * ones whose files are still changed locally.
+	 */
+	void LoadRememberedLocks(TSet<FString>& OutPaths);
+	void SaveRememberedLocks(const TSet<FString>& InPaths);
+	void ForgetRememberedLock(const FString& InPath);
+
 	/** Parse `lore lock query` output into lock records. */
 	void ParseLockQueryResults(const TArray<FString>& InResults, TArray<FLoreLockInfo>& OutLocks);
 

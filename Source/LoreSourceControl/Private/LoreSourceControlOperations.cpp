@@ -109,12 +109,88 @@ namespace
 		{
 			TArray<FString> LockResults;
 			int32 LockReturn = -1;
-			LoreSourceControlUtils::RunCommand(TEXT("lock query"), TArray<FString>(), TArray<FString>(), Context, LockResults, Command.ErrorMessages, LockReturn);
+			const bool bLockQueryOk = LoreSourceControlUtils::RunCommand(TEXT("lock query"), TArray<FString>(), TArray<FString>(), Context, LockResults, Command.ErrorMessages, LockReturn);
 
 			TArray<FLoreLockInfo> Locks;
 			LoreSourceControlUtils::ParseLockQueryResults(LockResults, Locks);
 			// Locks carry the authenticated user's name; fall back to it when no identity is configured.
 			const FString LockUser = Command.UserName.IsEmpty() ? LoreSourceControlUtils::DetectAuthenticatedUser(Context) : Command.UserName;
+
+			// The server keeps locks in memory, so a restart wipes them. Remember our own locks and
+			// take back the ones that vanished while their file is still changed locally.
+			if (bLockQueryOk && !LockUser.IsEmpty())
+			{
+				TSet<FString> Mine;
+				for (const FLoreLockInfo& Lock : Locks)
+				{
+					if (Lock.Owner.Equals(LockUser, ESearchCase::IgnoreCase))
+					{
+						Mine.Add(Lock.Path);
+					}
+				}
+
+				TSet<FString> Remembered;
+				LoreSourceControlUtils::LoadRememberedLocks(Remembered);
+				TArray<FString> Lost;
+				for (const FString& Path : Remembered)
+				{
+					if (!Mine.Contains(Path))
+					{
+						Lost.Add(Path);
+					}
+				}
+
+				if (!Lost.IsEmpty())
+				{
+					TSet<FString> Changed;
+					TArray<FString> StatusLines;
+					TArray<FString> StatusErrors;
+					int32 StatusReturn = -1;
+					if (LoreSourceControlUtils::RunCommand(TEXT("status"), TArray<FString>(), TArray<FString>(), Context, StatusLines, StatusErrors, StatusReturn))
+					{
+						for (const FString& Raw : StatusLines)
+						{
+							FString Line = LoreSourceControlUtils::StripAnsi(Raw).TrimStartAndEnd();
+							if (Line.Len() > 2 && Line[1] == TEXT(' ') && FString(TEXT("MADRT")).Contains(Line.Left(1), ESearchCase::CaseSensitive))
+							{
+								Line = Line.Mid(2).TrimStartAndEnd();
+								int32 Open = INDEX_NONE;
+								if (Line.EndsWith(TEXT(")")) && Line.FindLastChar(TEXT('('), Open))
+								{
+									Line = Line.Left(Open).TrimEnd();
+								}
+								Changed.Add(Line);
+							}
+						}
+					}
+
+					for (const FString& Path : Lost)
+					{
+						if (!Changed.Contains(Path))
+						{
+							continue; // no longer being edited: nothing to protect
+						}
+						TArray<FString> AcquireResults;
+						TArray<FString> AcquireErrors;
+						int32 AcquireReturn = -1;
+						if (LoreSourceControlUtils::RunCommand(TEXT("lock acquire"), TArray<FString>(), { Path }, Context, AcquireResults, AcquireErrors, AcquireReturn))
+						{
+							FLoreLockInfo Restored;
+							Restored.Path = Path;
+							Restored.Owner = LockUser;
+							Locks.Add(Restored);
+							Mine.Add(Path);
+							UE_LOG(LogLoreSourceControl, Log, TEXT("Restored lock that vanished from the server: %s"), *Path);
+						}
+						else
+						{
+							UE_LOG(LogLoreSourceControl, Warning, TEXT("Could not restore lock (someone else may hold it now): %s"), *Path);
+						}
+					}
+				}
+				LoreSourceControlUtils::SaveRememberedLocks(Mine);
+			}
+
 			LoreSourceControlUtils::ApplyLocksToStates(Locks, LockUser, Command.WorkingCopyRoot, OutStates);
 		}
 

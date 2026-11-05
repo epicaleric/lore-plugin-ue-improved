@@ -747,6 +747,49 @@ void ParseHistoryResults(
 	FinalizeCurrent();
 }
 
+static FCriticalSection GRememberedLocksMutex;
+
+static FString RememberedLocksFile()
+{
+	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Lore"), TEXT("MyLocks.txt"));
+}
+
+void LoadRememberedLocks(TSet<FString>& OutPaths)
+{
+	FScopeLock ScopeLock(&GRememberedLocksMutex);
+	TArray<FString> Lines;
+	if (FFileHelper::LoadFileToStringArray(Lines, *RememberedLocksFile()))
+	{
+		for (const FString& Line : Lines)
+		{
+			const FString Path = Line.TrimStartAndEnd();
+			if (!Path.IsEmpty())
+			{
+				OutPaths.Add(Path);
+			}
+		}
+	}
+}
+
+void SaveRememberedLocks(const TSet<FString>& InPaths)
+{
+	FScopeLock ScopeLock(&GRememberedLocksMutex);
+	TArray<FString> Lines = InPaths.Array();
+	Lines.Sort();
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(RememberedLocksFile()), /*Tree=*/true);
+	FFileHelper::SaveStringArrayToFile(Lines, *RememberedLocksFile());
+}
+
+void ForgetRememberedLock(const FString& InPath)
+{
+	TSet<FString> Paths;
+	LoadRememberedLocks(Paths);
+	if (Paths.Remove(InPath) > 0)
+	{
+		SaveRememberedLocks(Paths);
+	}
+}
+
 FString DetectAuthenticatedUser(const FLoreCommandContext& InContext)
 {
 	static FCriticalSection Mutex;
