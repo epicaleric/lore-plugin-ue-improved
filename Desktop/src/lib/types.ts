@@ -42,6 +42,18 @@ export interface MirrorConfig {
   revision: number;
 }
 
+/** A server backup of a UEFN project, kept up to date from this PC. */
+export interface UefnBackup {
+  /** folder on this PC that is linked to the server */
+  folder: string;
+  /** name of the project on the server */
+  name: string;
+  /** when the last backup was made */
+  at?: number;
+  /** also once a day, when UEFN is closed */
+  daily: boolean;
+}
+
 export type SortKey = "name" | "opened" | "updated" | "revisions";
 
 export interface Settings {
@@ -60,6 +72,8 @@ export interface Settings {
   sort: SortKey;
   /** repository id -> GitHub mirror on this PC */
   mirrors: Record<string, MirrorConfig>;
+  /** UEFN project id -> its backup on the server */
+  uefnBackups: Record<string, UefnBackup>;
   /** how big the cards (grid) and the thumbnails (list) are */
   size: { grid: number; list: number };
   /** repository id -> when the project was last opened here */
@@ -99,6 +113,27 @@ export interface LocalProject {
   branch?: string;
 }
 
+/** A project of Unreal Editor for Fortnite as it was found on this PC. */
+export interface UefnFound {
+  path: string;
+  /** the .uefnproject */
+  file: string;
+  name: string;
+  description: string | null;
+  thumbnail: string | null;
+  projectId: string | null;
+  version: string | null;
+  /** how UEFN keeps its versions; the history of an old "urc" project can only be seen in UEFN */
+  store: "lore" | "urc" | null;
+  /** Epic account id of the person on this PC */
+  identity: string | null;
+}
+
+export interface UefnProject extends UefnFound {
+  id: string;
+  revisions?: Revision[];
+}
+
 /** What is known about a project on the server without having it on this PC. */
 export interface RemoteInfo {
   /** revision this was read at */
@@ -125,6 +160,8 @@ export interface Project {
   remote?: RemoteInfo;
   /** further working copies of the same project on this PC */
   copies: LocalProject[];
+  /** a project of UEFN: it has no `local`, because the app does not run Lore in its folder */
+  uefn?: UefnProject;
 }
 
 export interface RepoStatus {

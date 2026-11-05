@@ -11,7 +11,7 @@ import type { Project, SortKey } from "../lib/types";
 import { SignInModal } from "../components/Servers";
 import { AddProjectModal } from "../components/AddProject";
 
-type Filter = "all" | "local" | "remote" | "unlinked";
+type Filter = "all" | "local" | "remote" | "unlinked" | "uefn";
 
 export const DRAG_TYPE = "application/x-lore-project";
 
@@ -20,15 +20,19 @@ export function useProjectView(project: Project) {
   const override = project.id ? settings.overrides[project.id] : undefined;
   const status = useStatus(project.local?.path, server?.id, 0);
   const localLast = useLastRevision(project.local?.path, 0);
-  const last = localLast ?? project.remote?.last ?? null;
+  const last = localLast ?? project.remote?.last ?? project.uefn?.revisions?.[0] ?? null;
   const name = override?.displayName || project.name;
   const engine = override?.engine || project.local?.engine || project.remote?.engine || null;
-  const thumbnail = override?.thumbnail || project.local?.thumbnail || project.remote?.thumbnail || null;
+  const thumbnail = override?.thumbnail || project.local?.thumbnail || project.remote?.thumbnail || project.uefn?.thumbnail || null;
   return { name, engine, thumbnail, status, last, override, bytes: project.remote?.bytes ?? 0 };
 }
 
 export function StatusPill({ project, status }: { project: Project; status: ReturnType<typeof useStatus> }) {
   const { session } = useStore();
+  if (project.uefn) {
+    const revision = project.uefn.revisions?.[0]?.number;
+    return <Pill tone="accent" title="A project of Unreal Editor for Fortnite. Its versions are on Epic's server.">UEFN{revision ? ` · v${revision}` : ""}</Pill>;
+  }
   if (!project.onServer && !session) return <Pill tone="muted">On this PC</Pill>;
   if (!project.onServer) return <Pill tone="warn"><UploadCloud size={12} /> Not on server</Pill>;
   if (!project.local) return <Pill tone="muted"><CloudOff size={12} /> Not on this PC</Pill>;
@@ -39,6 +43,10 @@ export function StatusPill({ project, status }: { project: Project; status: Retu
   if (behind < 0) return <Pill tone="info" title="Versions on this PC that are not on the server yet"><ArrowUpFromLine size={12} /> {-behind} to send</Pill>;
   return <Pill tone="good" title={`Revision ${status.remoteRevision}, you have the latest`}><Check size={12} /> v{status.remoteRevision}</Pill>;
 }
+
+/** What the project is made with, for the line under its name. */
+export const madeWith = (project: Project, engine: string | null) =>
+  project.uefn ? `UEFN${project.uefn.version ? ` ${project.uefn.version}` : ""}` : engine ? `Unreal ${engine}` : project.local && !project.local.uproject ? "Not an Unreal project" : "Engine unknown";
 
 /** Small overlapping avatars of everybody who saved a version. */
 export function AuthorStack({ path, fallback }: { path: string | undefined; fallback?: string[] }) {
@@ -90,6 +98,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
         menu.open(e, [
           { label: "Open details", onClick: onOpen },
           ...(project.local ? [{ label: "Show in Explorer", onClick: () => api.openPath(project.local!.path) }] : []),
+          ...(project.uefn ? [{ label: "Show in Explorer", onClick: () => api.openPath(project.uefn!.path) }, { label: "Hide", onClick: () => update({ hidden: [...settings.hidden, project.uefn!.path] }) }] : []),
           { label: favorite ? "Remove from favorites" : "Add to favorites", onClick: () => toggleFavorite(e) },
           ...(project.id && settings.assignments[project.id] ? [{ label: "Take out of its category", onClick: () => { const next = { ...settings.assignments }; delete next[project.id!]; update({ assignments: next }); } }] : []),
         ])
@@ -116,7 +125,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
             <CategoryTag project={project} />
           </div>
           <div className="card-meta small" style={{ marginTop: 2 }}>
-            {view.engine ? <span>Unreal {view.engine}</span> : <span className="faint">{project.local && !project.local.uproject ? "Not an Unreal project" : "Engine unknown"}</span>}
+            {view.engine || project.uefn ? <span>{madeWith(project, view.engine)}</span> : <span className="faint">{madeWith(project, view.engine)}</span>}
             {view.bytes > 0 && <><span className="dotsep" /><span>{formatBytes(view.bytes)}</span></>}
             {view.last && (
               <>
@@ -136,6 +145,11 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
                   {working ? <Spinner size={14} /> : <Download size={14} />} Sync
                 </button>
               )}
+            </>
+          ) : project.uefn ? (
+            <>
+              <button className="btn small icon" title="Open the project folder" onClick={() => api.openPath(project.uefn!.path)}><FolderOpen size={15} /></button>
+              <button className="btn primary small" title="Open in UEFN" onClick={() => openProject(project)}><Play size={14} /> Open</button>
             </>
           ) : project.onServer ? (
             <button className="btn primary small" disabled={!!working} onClick={() => clone(project)}>
@@ -161,7 +175,7 @@ function ListRow({ project, onOpen }: { project: Project; onOpen: () => void }) 
           <div className="card-title">{view.name}</div>
           <CategoryTag project={project} />
         </div>
-        <div className="card-meta small" style={{ marginTop: 2 }}>{view.engine ? `Unreal ${view.engine}` : project.local && !project.local.uproject ? "Not an Unreal project" : "Engine unknown"}{view.bytes > 0 ? ` · ${formatBytes(view.bytes)}` : ""}</div>
+        <div className="card-meta small" style={{ marginTop: 2 }}>{madeWith(project, view.engine)}{view.bytes > 0 ? ` · ${formatBytes(view.bytes)}` : ""}</div>
       </div>
       <div className="row" style={{ gap: 6 }}><StatusPill project={project} status={view.status} /></div>
       <div className="muted" style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -173,6 +187,11 @@ function ListRow({ project, onOpen }: { project: Project; onOpen: () => void }) 
           <div className="row" style={{ gap: 10 }}>
             <button className="btn small icon" title="Open the project folder" onClick={() => api.openPath(project.local!.path)}><FolderOpen size={15} /></button>
             <button className="btn primary small" onClick={() => openProject(project)}><Play size={14} /> Open</button>
+          </div>
+        ) : project.uefn ? (
+          <div className="row" style={{ gap: 10 }}>
+            <button className="btn small icon" title="Open the project folder" onClick={() => api.openPath(project.uefn!.path)}><FolderOpen size={15} /></button>
+            <button className="btn primary small" title="Open in UEFN" onClick={() => openProject(project)}><Play size={14} /> Open</button>
           </div>
         ) : project.onServer ? (
           <button className="btn small" disabled={!!working} onClick={() => clone(project)}>{working ? <Spinner size={14} /> : <Download size={14} />} Clone</button>
@@ -226,9 +245,10 @@ export function Projects() {
 
   const shown = projects.filter((p) => {
     if (query && !p.name.toLowerCase().includes(query.toLowerCase())) return false;
-    if (filter === "local" && !p.local) return false;
-    if (filter === "remote" && p.local) return false;
-    if (filter === "unlinked" && p.onServer) return false;
+    if (filter === "local" && !p.local && !p.uefn) return false;
+    if (filter === "remote" && (p.local || p.uefn)) return false;
+    if (filter === "unlinked" && (p.onServer || p.uefn)) return false;
+    if (filter === "uefn" && !p.uefn) return false;
     if (categoryIds) {
       const assigned = p.id ? settings.assignments[p.id] : undefined;
       if (!assigned || !categoryIds.has(assigned)) return false;
@@ -237,9 +257,9 @@ export function Projects() {
   });
 
   const sorted = [...shown].sort((a, b) => {
-    const when = (p: Project) => Date.parse(peekRevision(p.local?.path)?.date ?? "") || 0;
+    const when = (p: Project) => Date.parse(peekRevision(p.local?.path)?.date ?? p.uefn?.revisions?.[0]?.date ?? "") || 0;
     const opened = (p: Project) => (p.id ? settings.opened[p.id] ?? 0 : 0);
-    const count = (p: Project) => peekStatus(p.local?.path)?.remoteRevision ?? 0;
+    const count = (p: Project) => peekStatus(p.local?.path)?.remoteRevision ?? p.uefn?.revisions?.[0]?.number ?? 0;
     switch (settings.sort) {
       case "opened": return opened(b) - opened(a) || a.name.localeCompare(b.name);
       case "updated": return when(b) - when(a) || a.name.localeCompare(b.name);
@@ -258,7 +278,7 @@ export function Projects() {
       <div className="topbar">
         <div>
           <h1>{title}</h1>
-          <div className="sub">{server ? `${server.label} · ${projects.filter((p) => p.onServer).length} on the server, ${projects.filter((p) => p.local).length} on this PC` : "No server yet"}</div>
+          <div className="sub">{server ? `${server.label} · ${projects.filter((p) => p.onServer).length} on the server, ${projects.filter((p) => p.local || p.uefn).length} on this PC` : "No server yet"}</div>
         </div>
         <div className="spacer" />
         <label className="search"><Search size={16} /><input placeholder="Search projects" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
@@ -281,6 +301,7 @@ export function Projects() {
           {chip("local", "On this PC")}
           {chip("remote", "Not on this PC")}
           {chip("unlinked", "Not on server")}
+          {projects.some((p) => p.uefn) && chip("uefn", "UEFN")}
         </div>
 
         {server && !session && (

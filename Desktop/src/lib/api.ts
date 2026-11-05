@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AdminUser, CliResult, Engine, FolderListing, Grant, Server, SessionInfo, Settings } from "./types";
+import type { AdminUser, CliResult, Engine, FolderListing, Grant, Server, SessionInfo, Settings, UefnFound } from "./types";
 
 const streams = new Set<string>();
 
@@ -49,6 +49,11 @@ export const api = {
   scan: (roots: string[]) => invoke<string[]>("scan_lore_projects", { roots }),
   readProject: (path: string) =>
     invoke<{ path: string; name: string; uproject: string | null; engine: string | null; description: string | null; thumbnail: string | null; plugin: string | null; repoId: string | null; pluginBroken: boolean; needsPlugin: boolean; isGit: boolean }>("read_project", { path }),
+  scanUefn: (roots: string[]) => invoke<UefnFound[]>("scan_uefn_projects", { roots }),
+  uefnRunning: () => invoke<boolean>("uefn_running"),
+  uefnSnapshot: (path: string, id: string) => invoke<string | null>("uefn_snapshot", { path, id }),
+  openUefn: (file: string) => invoke<void>("open_uefn", { file }),
+  uefnBackupCopy: (from: string, to: string) => invoke<void>("uefn_backup_copy", { from, to }),
   readImage: (path: string) => invoke<string | null>("read_image", { path }),
   openProject: (uproject: string, editor?: string | null) => invoke<void>("open_project", { uproject, editor: editor ?? null }),
   openPath: (path: string) => invoke<void>("open_path", { path }),

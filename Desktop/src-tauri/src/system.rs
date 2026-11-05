@@ -107,7 +107,11 @@ pub fn plugin_version(project_or_engine: String, kind: String) -> Value {
 
 fn collect_lore_dirs(dir: &Path, depth: u32, out: &mut Vec<String>) {
     if dir.join(".lore").exists() {
-        out.push(dir.to_string_lossy().to_string());
+        // A UEFN project talks to Epic's server. Lore commands would write in its store, see uefn.rs.
+        let epic = std::fs::read_to_string(dir.join(".lore").join("config.toml")).is_ok_and(|config| config.contains(".epicgames.com"));
+        if !epic {
+            out.push(dir.to_string_lossy().to_string());
+        }
         return;
     }
     if depth == 0 {

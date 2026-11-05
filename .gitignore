@@ -39,3 +39,6 @@ Desktop/src-tauri/target/
 Desktop/src-tauri/gen/
 .lore/
 .lore.old-*/
+Desktop/*.exe
+Desktop/shot*.png
+Desktop/README.root.md

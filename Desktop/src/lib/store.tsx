@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, adminApi } from "./api";
-import { parseInfo, parseRepoList } from "./parse";
+import { parseHistory, parseInfo, parseRepoList } from "./parse";
 import { readableOn } from "./format";
 import { cachedRemoteInfo, loadRemoteInfo } from "./remote";
 import { SHARED_NAME, createShared, pullShared, pushShared, shareWithEveryone, visibleCategories } from "./shared";
-import type { Category, Engine, RemoteInfo, LocalProject, Project, RemoteRepo, Server, SessionInfo, Settings } from "./types";
+import type { Category, Engine, RemoteInfo, LocalProject, Project, RemoteRepo, Revision, Server, SessionInfo, Settings, UefnProject } from "./types";
 
 export type View = "projects" | "project" | "admin" | "updates" | "settings";
 
@@ -26,6 +26,7 @@ export const defaultSettings: Settings = {
   view: "grid",
   sort: "name",
   mirrors: {},
+  uefnBackups: {},
   size: { grid: 250, list: 52 },
   opened: {},
   autoUpdate: { lore: true, plugin: true, app: true },
@@ -47,6 +48,7 @@ interface Store {
   categories: Category[];
   remoteError: string | null;
   locals: LocalProject[];
+  uefns: UefnProject[];
   projects: Project[];
   loading: boolean;
   reload: () => Promise<void>;
@@ -81,6 +83,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [locals, setLocals] = useState<LocalProject[]>([]);
+  const [uefns, setUefns] = useState<UefnProject[]>([]);
+  const [uefnHistory, setUefnHistory] = useState<Record<string, Revision[]>>({});
+  const readingUefn = useRef(false);
   const [loading, setLoading] = useState(false);
   const [engines, setEngines] = useState<Engine[]>([]);
   const [view, setView] = useState<View>("projects");
@@ -225,6 +230,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }),
       );
       setLocals(found);
+
+      // Projects of UEFN. Their revisions are read afterwards, from copies of their stores, one at a time.
+      const used = new Set<string>();
+      const uefn = (await api.scanUefn(roots).catch(() => [])).map((project): UefnProject => {
+        const id = project.projectId && !used.has(project.projectId) ? `uefn-${project.projectId}` : `uefn-${project.path.replace(/[^A-Za-z0-9]+/g, "-")}`;
+        if (project.projectId) used.add(project.projectId);
+        return { ...project, id };
+      });
+      setUefns(uefn);
+      if (!readingUefn.current) {
+        readingUefn.current = true;
+        (async () => {
+          for (const project of uefn.filter((p) => p.store === "lore")) {
+            const copy = await api.uefnSnapshot(project.path, project.id).catch(() => null);
+            const history = copy ? await api.lore(["history", "60"], copy) : null;
+            // Revisions from UEFN usually name an Epic account id, not a person.
+            const named = (author: string) => (!/^[0-9a-f]{32}$/i.test(author) ? author : author === project.identity ? "You" : "Teammate");
+            if (history?.ok) setUefnHistory((all) => ({ ...all, [project.id]: parseHistory(history.stdout).map((r) => ({ ...r, author: named(r.author) })) }));
+          }
+        })().finally(() => { readingUefn.current = false; });
+      }
     } finally {
       setLoading(false);
     }
@@ -290,7 +316,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     const list: Project[] = [];
     const used = new Set<string>();
-    for (const repo of remote) {
+    // The server copy of a UEFN backup is shown with the UEFN project itself.
+    const backups = new Set(Object.values(settings.uefnBackups).map((b) => b.name));
+    for (const repo of remote.filter((r) => !backups.has(r.name))) {
       const copies = byKey.get(repo.id) ?? [];
       used.add(repo.id);
       list.push({ key: repo.id, id: repo.id, name: repo.name, onServer: true, local: copies[0], copies: copies.slice(1), remote: remoteInfo[repo.id] });
@@ -298,6 +326,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     for (const [key, copies] of byKey) {
       if (!used.has(key)) {
         list.push({ key, id: copies[0].repoId, name: copies[0].repoName ?? copies[0].name, onServer: false, local: copies[0], copies: copies.slice(1) });
+      }
+    }
+    for (const project of uefns) {
+      if (!settings.hidden.includes(project.path)) {
+        list.push({ key: project.id, id: project.id, name: project.name, onServer: false, copies: [], uefn: { ...project, revisions: uefnHistory[project.id] } });
       }
     }
     // Projects in a category this user may not see are left out as well.
@@ -308,7 +341,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return !assigned || !known.has(assigned) || shown.has(assigned);
     });
     return allowed.sort((a, b) => a.name.localeCompare(b.name));
-  }, [remote, locals, remoteInfo, settings.hidden, settings.assignments, settings.categories, categories]);
+  }, [remote, locals, uefns, uefnHistory, remoteInfo, settings.hidden, settings.assignments, settings.categories, settings.uefnBackups, categories]);
 
   // Where the user has been, so the mouse's back button works like in a browser.
   const trail = useRef<{ view: View; projectKey: string | null; category: string }[]>([{ view: "projects", projectKey: null, category: "all" }]);
@@ -358,6 +391,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     categories,
     remoteError,
     locals,
+    uefns,
     projects,
     loading,
     reload,

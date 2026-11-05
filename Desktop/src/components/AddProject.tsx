@@ -7,13 +7,9 @@ import { squarePng, thumbnailPathOf } from "../lib/image";
 import { parseStatus } from "../lib/parse";
 import { invalidateStatus } from "../lib/actions";
 import { endJob, startJob } from "../lib/jobs";
+import { isEpicProject, serverName } from "../lib/uefn";
 import { useStore } from "../lib/store";
 import { Field, Modal, Spinner } from "./ui";
-
-/** Server names stay simple: letters, digits, dots, dashes and underscores. */
-function serverName(name: string): string {
-  return name.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-}
 
 const IGNORE_TEMPLATE = `# Generated Unreal and workstation state
 /Saved/
@@ -98,6 +94,8 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
 
   const upload = async () => {
     if (!server || !session) return;
+    // Its .lore is what connects the project to Epic. Uploading would set that aside.
+    if (await isEpicProject(folder)) return toast("This is a UEFN project, linked to Epic's server. Open it on the Projects page and use its backup instead.", "bad");
     // Two Lore commands in the same folder write over each other. That was behind the hash collision errors.
     if (!startJob(folder)) return toast("This folder is already being uploaded.", "bad");
     const list: Step[] = [

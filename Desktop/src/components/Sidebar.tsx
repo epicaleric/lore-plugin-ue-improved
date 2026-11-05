@@ -131,11 +131,11 @@ export function Sidebar() {
                 <button className={`nav-item ${view === "project" && projectKey === p.key ? "active" : ""}`} onClick={() => go("project", p.key)}>
                   <span className="cat-row"><Star size={13} fill="currentColor" color="var(--warn)" />{settings.overrides[p.id!]?.displayName || p.name}</span>
                 </button>
-                {p.local && (
+                {(p.local || p.uefn) && (
                   <button
                     className="row-play"
-                    title={p.local.uproject ? "Open in Unreal Engine" : "Open the folder"}
-                    onClick={() => (p.local!.uproject ? openProject(p) : api.openPath(p.local!.path))}
+                    title={p.uefn ? "Open in UEFN" : p.local!.uproject ? "Open in Unreal Engine" : "Open the folder"}
+                    onClick={() => (p.uefn || p.local!.uproject ? openProject(p) : api.openPath(p.local!.path))}
                   >
                     <Play size={13} fill="currentColor" />
                   </button>

@@ -9,3 +9,6 @@ Desktop/dist/
 Desktop/src-tauri/target/
 **/Intermediate/
 **/Binaries/
+Desktop/*.exe
+Desktop/shot*.png
+Desktop/README.root.md

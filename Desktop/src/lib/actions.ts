@@ -142,6 +142,16 @@ export function useProjectActions() {
   };
 
   const openProject = async (project: Project) => {
+    if (project.uefn) {
+      try {
+        await api.openUefn(project.uefn.file);
+        update({ opened: { ...settings.opened, [project.key]: Date.now() } });
+        toast(`${project.name} opens in UEFN`, "good");
+      } catch (error) {
+        toast(String(error), "bad");
+      }
+      return;
+    }
     const local = project.local;
     if (!local) return;
     // Not an Unreal project: its folder is what there is to open.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowLeft, Download, EyeOff, FolderInput, FolderOpen, Lock, Play, RefreshCw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
+import { ArrowLeft, Download, EyeOff, FolderInput, FolderOpen, Lock, Play, RefreshCw, Search, ShieldCheck, Trash2, UploadCloud, Users } from "lucide-react";
 import { Avatar, Empty, Field, Pill, Spinner, Switch, Thumb, forgetImages } from "../components/ui";
 import { api, adminApi } from "../lib/api";
 import { formatBytes, fullDate, timeAgo } from "../lib/format";
@@ -8,11 +8,12 @@ import { layoutDescription, parseHistory, parseStatus } from "../lib/parse";
 import { invalidateStatus, useProjectActions } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { squarePng, thumbnailPathOf } from "../lib/image";
+import { BACKUP_SUFFIX, backupUefn, serverName } from "../lib/uefn";
 import { pluginIsOutdated, useUpdates } from "../lib/updates";
 import type { AdminUser, FolderListing, Grant, LocalProject, Project, Revision } from "../lib/types";
 import { ConfirmModal, useDeletes } from "../components/Danger";
 import { Changes } from "./Changes";
-import { StatusPill, useProjectView } from "./Projects";
+import { StatusPill, madeWith, useProjectView } from "./Projects";
 
 type Tab = "overview" | "changes" | "history" | "access" | "settings";
 
@@ -27,6 +28,10 @@ function History({ path }: { path: string }) {
   }, [path]);
   if (error) return <div className="banner bad">{error}</div>;
   if (!revisions) return <div className="muted row"><Spinner /> Loading history</div>;
+  return <Timeline revisions={revisions} />;
+}
+
+function Timeline({ revisions }: { revisions: Revision[] }) {
   return (
     <div className="timeline">
       {revisions.map((revision, index) => {
@@ -126,6 +131,88 @@ function Access({ repoId, repoName }: { repoId: string; repoName: string }) {
   );
 }
 
+/** Where a UEFN project is, and its backup on the server. The real project stays on Epic's server. */
+function UefnPanels({ project }: { project: Project }) {
+  const { server, session, settings, update, toast, reload } = useStore();
+  const uefn = project.uefn!;
+  const backup = settings.uefnBackups[uefn.id];
+  const [line, setLine] = useState<string | null>(null);
+  const set = (next: typeof backup) => update({ uefnBackups: { ...settings.uefnBackups, [uefn.id]: next } });
+
+  const run = async (target: typeof backup) => {
+    if (!server) return;
+    setLine("Starting");
+    try {
+      const sent = await backupUefn(server, uefn, target, setLine);
+      set({ ...target, at: Date.now() });
+      toast(sent ? `${project.name} is backed up on ${server.label}` : "Nothing changed since the last backup", "good");
+    } catch (error) {
+      toast(String(error), "bad");
+    } finally {
+      setLine(null);
+    }
+  };
+
+  const start = async () => {
+    const parent = await open({ directory: true, multiple: false, title: "Where should the copy for the backup go?" });
+    if (!parent || Array.isArray(parent)) return;
+    if (parent.toLowerCase().startsWith(uefn.path.toLowerCase())) return toast("Choose a folder outside the project.", "bad");
+    const name = `${serverName(project.name)}${BACKUP_SUFFIX}`;
+    const target = { folder: `${parent.replace(/[\\/]$/, "")}\\${name}`, name, daily: false };
+    if (await api.exists(target.folder)) return toast(`${target.folder} already exists. Choose another folder.`, "bad");
+    set(target);
+    await run(target);
+    await reload();
+  };
+
+  const getCopy = async () => {
+    if (!server || !backup) return;
+    const parent = await open({ directory: true, multiple: false, title: "Where should the copy of the backup go?" });
+    if (!parent || Array.isArray(parent)) return;
+    const target = `${parent.replace(/[\\/]$/, "")}\\${backup.name}-${new Date().toISOString().slice(0, 10)}`;
+    setLine("Getting the backup");
+    const result = await api.lore(["clone", `${server.loreUrl}/${backup.name}`, target], null, server.id);
+    setLine(null);
+    if (!result.ok) return toast((result.stderr || result.stdout).trim().split("\n")[0], "bad");
+    toast("The copy of the backup is ready. Close UEFN before you copy anything back.", "good");
+    api.openPath(target);
+  };
+
+  return (
+    <>
+      <div className="panel">
+        <h3>On this PC</h3>
+        <table className="table"><tbody>
+          <tr><td className="muted" style={{ width: 170 }}>Folder</td><td className="mono">{uefn.path}</td></tr>
+          <tr><td className="muted">Versions</td><td>{uefn.store === "lore" ? "On Epic's server. Syncing and checking in happen in UEFN." : uefn.store === "urc" ? "On Epic's server, in UEFN's older format. Its history can only be seen in UEFN." : "This project has no revision control."}</td></tr>
+          {uefn.description && <tr><td className="muted">Description</td><td>{uefn.description}</td></tr>}
+        </tbody></table>
+      </div>
+      <div className="panel">
+        <h3>Backup on {server?.label ?? "your server"}</h3>
+        <div className="desc">A safety copy of what is on this PC, including source files such as .blend and .fbx. UEFN keeps working with Epic's server, and Open always opens the project itself, not this backup.</div>
+        {line && <div className="muted row" style={{ marginBottom: 10 }}><Spinner size={14} /> {line}</div>}
+        {!session ? <div className="muted">Sign in to the server to make a backup.</div> : !backup ? (
+          <button className="btn" disabled={!!line} onClick={start}><UploadCloud size={16} /> Back up to the server</button>
+        ) : (
+          <>
+            <div className="row gap-s">
+              <button className="btn" disabled={!!line} onClick={() => run(backup)}><UploadCloud size={16} /> Back up now</button>
+              <button className="btn" disabled={!!line} onClick={getCopy}><Download size={16} /> Get a copy</button>
+              <button className="btn" onClick={() => api.openPath(backup.folder)}><FolderOpen size={16} /> Folder</button>
+              <span className="muted">{backup.at ? `Last backup ${timeAgo(new Date(backup.at).toISOString())}` : "No backup yet"}</span>
+            </div>
+            <div className="row gap-s" style={{ marginTop: 12 }}>
+              <Switch on={backup.daily} onChange={(daily) => set({ ...backup, daily })} />
+              <span>Also once a day, when UEFN is closed and Lore+ is open</span>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 /** Sends every new version of a project that is also a Git repository to GitHub. */
 function MirrorSettings({ project }: { project: Project }) {
   const { settings, update, toast } = useStore();
@@ -188,12 +275,14 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
       <Field label="Display name">
         <input className="input" value={name} placeholder={project.name} onChange={(e) => setName(e.target.value)} onBlur={() => set({ displayName: name.trim() || undefined })} />
       </Field>
-      <Field label="Unreal version" hint="By default the version from the project itself is used.">
-        <select className="select" value={override.engine ?? ""} onChange={(e) => set({ engine: e.target.value || undefined })}>
-          <option value="">Automatic ({project.local?.engine ?? "unknown"})</option>
-          {engines.map((e) => <option key={e.path} value={e.version}>{e.version}</option>)}
-        </select>
-      </Field>
+      {!project.uefn && (
+        <Field label="Unreal version" hint="By default the version from the project itself is used.">
+          <select className="select" value={override.engine ?? ""} onChange={(e) => set({ engine: e.target.value || undefined })}>
+            <option value="">Automatic ({project.local?.engine ?? "unknown"})</option>
+            {engines.map((e) => <option key={e.path} value={e.version}>{e.version}</option>)}
+          </select>
+        </Field>
+      )}
       <Field label="Category">
         <select
           className="select"
@@ -210,11 +299,22 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
         </select>
       </Field>
       <MirrorSettings project={project} />
-      <Field label="Thumbnail" hint="Saved in the Unreal project itself (a .png next to the .uproject). It goes to the server with the next version you save, so everybody sees it.">
+      <Field label="Thumbnail" hint={project.uefn ? "Only used in this app on this PC. The UEFN project itself is not changed." : "Saved in the Unreal project itself (a .png next to the .uproject). It goes to the server with the next version you save, so everybody sees it."}>
         <div className="row gap-s">
-          <button className="btn" disabled={!project.local?.uproject} onClick={async () => {
+          <button className="btn" disabled={!project.local?.uproject && !project.uefn} onClick={async () => {
             const file = await open({ multiple: false, filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg"] }] });
-            if (!file || Array.isArray(file) || !project.local?.uproject) return;
+            if (!file || Array.isArray(file)) return;
+            if (project.uefn) {
+              try {
+                const target = `${await api.bareDir()}/uefn-thumbnails/${id}-${Date.now()}.png`;
+                await api.writeBinary(target, await squarePng(file));
+                set({ thumbnail: target });
+              } catch (error) {
+                toast(String(error), "bad");
+              }
+              return;
+            }
+            if (!project.local?.uproject) return;
             try {
               // Unreal's own project thumbnail: a square png next to the .uproject, named like it.
               const target = thumbnailPathOf(project.local.uproject);
@@ -228,7 +328,7 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
             }
           }}>Choose image</button>
           {override.thumbnail && <button className="btn ghost" onClick={() => { set({ thumbnail: undefined }); toast("Thumbnail reset"); }}>Use the project's own</button>}
-          {!project.local?.uproject && <span className="faint">Needs a copy of the project on this PC.</span>}
+          {!project.local?.uproject && !project.uefn && <span className="faint">Needs a copy of the project on this PC.</span>}
         </div>
       </Field>
     </div>
@@ -270,8 +370,7 @@ function useCopyTools(project: Project) {
 }
 
 /** What is in the project folder on this PC and how big it is. */
-function Files({ project, inSync, changes }: { project: Project; inSync: boolean | undefined; changes: number | undefined }) {
-  const path = project.local!.path;
+function Files({ path, inSync, changes }: { path: string; inSync: boolean | undefined; changes: number | undefined }) {
   const [listing, setListing] = useState<FolderListing | null>(null);
   useEffect(() => {
     setListing(null);
@@ -420,7 +519,8 @@ export function ProjectDetail() {
           <h1>{view.name}</h1>
           <div className="row gap-s" style={{ marginTop: 4 }}>
             <StatusPill project={project} status={view.status} />
-            {view.engine && <Pill>Unreal {view.engine}</Pill>}
+            {view.engine && !project.uefn && <Pill>Unreal {view.engine}</Pill>}
+            {project.uefn?.version && <Pill>{madeWith(project, null)}</Pill>}
             {category && <Pill tone="accent">{category.name}</Pill>}
           </div>
         </div>
@@ -431,6 +531,11 @@ export function ProjectDetail() {
             <button className="btn" onClick={() => api.openPath(project.local!.path)}><FolderOpen size={16} /> Folder</button>
             {project.local.uproject && <button className="btn primary" onClick={() => openProject(project)}><Play size={16} /> Open in Unreal</button>}
           </>
+        ) : project.uefn ? (
+          <>
+            <button className="btn" onClick={() => api.openPath(project.uefn!.path)}><FolderOpen size={16} /> Folder</button>
+            <button className="btn primary" onClick={() => openProject(project)}><Play size={16} /> Open in UEFN</button>
+          </>
         ) : project.onServer ? (
           <>
             <button className="btn" onClick={copyTools.find}><Search size={16} /> I have a copy</button>
@@ -440,7 +545,7 @@ export function ProjectDetail() {
       </div>
       <div className="content">
         <div className="tabs">
-          {(project.local ? ["overview", "changes", "history", "access", "settings"] : ["overview", "history", "access", "settings"] as Tab[]).map((t) => (
+          {(project.uefn ? ["overview", "history", "settings"] : project.local ? ["overview", "changes", "history", "access", "settings"] : ["overview", "history", "access", "settings"] as Tab[]).map((t) => (
             <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t as Tab)}>
               {t === "access" && <Users size={15} />}{t[0].toUpperCase() + t.slice(1)}
             </button>
@@ -460,7 +565,7 @@ export function ProjectDetail() {
                     <div className="rev-desc" style={{ margin: "6px 0 0" }}>{layoutDescription(view.last.description).map((l, i) => <div key={i} className={i > 0 ? "sub" : ""}>{l}</div>)}</div>
                   </div>
                 </div>
-              ) : <div className="muted">{project.local ? "No history yet." : "Clone the project to see its history."}</div>}
+              ) : <div className="muted">{project.uefn ? (project.uefn.store === "lore" ? "Reading the history." : "The history of this project can only be seen in UEFN.") : project.local ? "No history yet." : "Clone the project to see its history."}</div>}
             </div>
             {project.local && (
               <div className="panel">
@@ -480,14 +585,15 @@ export function ProjectDetail() {
                 </tbody></table>
               </div>
             )}
-            {project.local ? <Files project={project} inSync={view.status?.inSync} changes={view.status?.changes} /> : project.remote ? <RemoteFiles project={project} /> : null}
+            {project.uefn && <UefnPanels project={project} />}
+            {project.local || project.uefn ? <Files path={project.local?.path ?? project.uefn!.path} inSync={view.status?.inSync} changes={view.status?.changes} /> : project.remote ? <RemoteFiles project={project} /> : null}
             <Copies project={project} />
-            {!project.onServer && <div className="banner">This project is only on this PC. Use <b>Add project</b> on the Projects page to put it on {server?.label ?? "the server"}.</div>}
+            {!project.onServer && !project.uefn && <div className="banner">This project is only on this PC. Use <b>Add project</b> on the Projects page to put it on {server?.label ?? "the server"}.</div>}
           </div>
         )}
 
         {tab === "changes" && project.local && <Changes key={project.local.path} project={project} />}
-        {tab === "history" && (project.local ? <History path={project.local.path} /> : <Empty icon={<Download size={28} />} title="Clone the project to see its history">The history is read from the copy on your PC.</Empty>)}
+        {tab === "history" && (project.uefn ? (project.uefn.revisions?.length ? <Timeline revisions={project.uefn.revisions} /> : <Empty icon={<Download size={28} />} title="No history to show">{project.uefn.store === "lore" ? "It is still being read." : "This project keeps its history in a format that can only be seen in UEFN."}</Empty>) : project.local ? <History path={project.local.path} /> : <Empty icon={<Download size={28} />} title="Clone the project to see its history">The history is read from the copy on your PC.</Empty>)}
         {tab === "access" && (project.id ? <Access repoId={project.id} repoName={view.name} /> : <div className="banner">Access can be set once the project is on the server.</div>)}
         {tab === "settings" && (<><ProjectSettings projectKey={project.key} /><DangerZone project={project} /></>)}
       </div>

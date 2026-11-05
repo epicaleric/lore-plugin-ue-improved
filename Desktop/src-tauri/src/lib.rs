@@ -1,6 +1,7 @@
 mod grpc;
 mod lore;
 mod system;
+mod uefn;
 
 use lore::{CliResult, Server};
 use serde::{Deserialize, Serialize};
@@ -281,6 +282,11 @@ pub fn run() {
             system::write_binary_file,
             system::folder_stats,
             system::folder_listing,
+            uefn::scan_uefn_projects,
+            uefn::uefn_running,
+            uefn::uefn_snapshot,
+            uefn::open_uefn,
+            uefn::uefn_backup_copy,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lore+")
