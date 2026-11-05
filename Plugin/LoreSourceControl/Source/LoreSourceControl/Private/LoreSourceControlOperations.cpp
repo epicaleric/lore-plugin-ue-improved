@@ -314,7 +314,18 @@ bool FLoreUpdateStatusWorker::Execute(FLoreSourceControlCommand& InCommand)
 		bWithHistory = Operation->ShouldUpdateHistory();
 	}
 
-	return RefreshFileStates(InCommand, /*bScan=*/true, bWithHistory, OutStates, &OutHistory);
+	const bool bOk = RefreshFileStates(InCommand, /*bScan=*/true, bWithHistory, OutStates, &OutHistory);
+
+	// Submit Content asks for a status pass over the whole project and lists whatever is cached as submittable
+	// afterwards. Log what that pass found, so an empty submit list can be traced to its cause.
+	int32 Pending = 0;
+	for (const FLoreSourceControlState& State : OutStates)
+	{
+		Pending += State.CanCheckIn() ? 1 : 0;
+	}
+	UE_LOG(LogLoreSourceControl, Log, TEXT("UpdateStatus: %d path(s) requested, %d state(s) returned, %d submittable (ok=%d)"),
+		InCommand.Files.Num(), OutStates.Num(), Pending, bOk ? 1 : 0);
+	return bOk;
 }
 
 bool FLoreUpdateStatusWorker::UpdateStates() const

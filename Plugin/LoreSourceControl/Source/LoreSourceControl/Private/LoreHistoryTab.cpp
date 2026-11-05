@@ -2607,13 +2607,13 @@ private:
 			}
 		}
 
-		// Newest stable version first, the lighter model before the full one (it has the higher free limits).
+		// Stable before preview, then the lighter model before the full one (fast, and higher free limits; a one-line
+		// description does not need more), then the newest version first.
 		Candidates.Sort([](const FCandidate& A, const FCandidate& B)
 		{
 			if (A.bPreview != B.bPreview) { return !A.bPreview; }
-			const int32 Compare = CompareVersions(A.Name, B.Name);
-			if (Compare != 0) { return Compare > 0; }
-			return A.bLite && !B.bLite;
+			if (A.bLite != B.bLite) { return A.bLite; }
+			return CompareVersions(A.Name, B.Name) > 0;
 		});
 
 		GeminiModels.Reset();
@@ -2641,7 +2641,7 @@ private:
 		Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 		Request->SetHeader(TEXT("x-goog-api-key"), GeminiKey);
 		Request->SetContentAsString(GeminiBody);
-		Request->SetTimeout(60.0f);
+		Request->SetTimeout(25.0f);
 		Request->OnProcessRequestComplete().BindSP(this, &SLoreHistoryPanel::OnGenerated);
 		Request->ProcessRequest();
 	}
@@ -2650,23 +2650,27 @@ private:
 	{
 		const FString UsedModel = GeminiModels.IsValidIndex(GeminiModelIndex) ? GeminiModels[GeminiModelIndex] : FString();
 
-		// Limit reached or model unavailable: quietly move on to the next flash model.
-		if (bSucceeded && InResponse.IsValid())
+		// Limit reached, model unavailable or no answer in time: quietly move on to the next flash model.
+		const bool bHasResponse = bSucceeded && InResponse.IsValid();
+		const int32 Code = bHasResponse ? InResponse->GetResponseCode() : 0;
+		if ((!bHasResponse || Code == 429 || Code == 503 || Code == 500 || Code == 404) && GeminiModels.IsValidIndex(GeminiModelIndex + 1))
 		{
-			const int32 Code = InResponse->GetResponseCode();
-			if ((Code == 429 || Code == 503 || Code == 500 || Code == 404) && GeminiModels.IsValidIndex(GeminiModelIndex + 1))
-			{
-				UE_LOG(LogLoreSourceControl, Log, TEXT("LoreHistory: Gemini model %s answered HTTP %d, trying %s"), *UsedModel, Code, *GeminiModels[GeminiModelIndex + 1]);
-				GenerateStatus->SetText(FText::Format(LOCTEXT("GenerateFallback", "{0} is not available right now (limit reached). Trying {1}..."), FText::FromString(UsedModel), FText::FromString(GeminiModels[GeminiModelIndex + 1])));
-				TryGeminiModel(GeminiModelIndex + 1);
-				return;
-			}
+			UE_LOG(LogLoreSourceControl, Log, TEXT("LoreHistory: Gemini model %s %s, trying %s"), *UsedModel, bHasResponse ? *FString::Printf(TEXT("answered HTTP %d"), Code) : TEXT("did not answer (timeout or connection error)"), *GeminiModels[GeminiModelIndex + 1]);
+			GenerateStatus->SetText(FText::Format(LOCTEXT("GenerateFallback", "{0} is not available right now. Trying {1}..."), FText::FromString(UsedModel), FText::FromString(GeminiModels[GeminiModelIndex + 1])));
+			TryGeminiModel(GeminiModelIndex + 1);
+			return;
 		}
 
 		bGenerating = false;
-		if (!bSucceeded || !InResponse.IsValid())
+		if (!bHasResponse)
 		{
-			GenerateStatus->SetText(LOCTEXT("GenerateNoConnection", "Could not reach Gemini. Check your internet connection."));
+			UE_LOG(LogLoreSourceControl, Warning, TEXT("LoreHistory: Gemini model %s did not answer (timeout or connection error)"), *UsedModel);
+			GenerateStatus->SetText(LOCTEXT("GenerateNoConnection", "Gemini did not answer in time. Try again in a moment; if it keeps happening, check your internet connection."));
+			return;
+		}
+		if (Code == 503)
+		{
+			GenerateStatus->SetText(LOCTEXT("GenerateBusy", "Gemini is very busy right now. Try again in a moment or write the description yourself."));
 			return;
 		}
 		if (InResponse->GetResponseCode() == 429)
@@ -2722,6 +2726,11 @@ private:
 		{
 			GenerateStatus->SetText(LOCTEXT("GenerateEmpty", "Gemini returned no text. Try again."));
 			return;
+		}
+		// Start with the model that just worked next time, so a busy model is not retried first.
+		if (GeminiModelIndex > 0 && GeminiModels.IsValidIndex(GeminiModelIndex))
+		{
+			GeminiModels.Swap(0, GeminiModelIndex);
 		}
 		DescriptionBox->SetText(FText::FromString(Generated));
 		GenerateStatus->SetText(FText::Format(LOCTEXT("GenerateDone", "Written by {0}. Edit it if you like, then Submit."), FText::FromString(UsedModel)));
