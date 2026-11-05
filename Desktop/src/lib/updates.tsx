@@ -154,7 +154,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   }, [lore.asset]);
 
   const installApp = useCallback(async () => {
-    if (!app.asset) return;
+    if (!app.asset || busy["app"]) return;
     if (jobsRunning()) {
       toast("An upload is running. Lore+ updates when it is done.", "info");
       return;
@@ -164,7 +164,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
       await new Promise((resolve) => setTimeout(resolve, 3500));
       await api.installAppUpdate(app.asset!);
     });
-  }, [app.asset]);
+  }, [app.asset, busy["app"]]);
 
   const installPlugin = useCallback(
     async (kind: "engine" | "project", target: string) => {

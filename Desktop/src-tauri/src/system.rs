@@ -308,10 +308,25 @@ async fn download(app: &AppHandle, task: &str, url: &str, target: &Path) -> Resu
 
 // ------------------------------------------------------------------ installs
 
+/// A file name in the temp folder that no earlier attempt can be holding on to. Older downloads of the same kind are removed when possible.
+fn download_target(prefix: &str, extension: &str) -> PathBuf {
+    let temp = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&temp) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(prefix) && name.ends_with(extension) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    temp.join(format!("{prefix}-{stamp}.{extension}"))
+}
+
 #[tauri::command]
 pub async fn install_lore_client(app: AppHandle, url: String) -> Result<(), String> {
     let task = "lore-client";
-    let target = std::env::temp_dir().join("lorehub-lore-client.msi");
+    let target = download_target("loreplus-lore-client", "msi");
     download(&app, task, &url, &target).await?;
     log(&app, task, "Installing (Windows asks for permission)...");
     let script = format!(
@@ -334,7 +349,7 @@ pub async fn install_lore_client(app: AppHandle, url: String) -> Result<(), Stri
 #[tauri::command]
 pub async fn install_app_update(app: AppHandle, url: String) -> Result<(), String> {
     let task = "app";
-    let target = std::env::temp_dir().join("lorehub-update-setup.exe");
+    let target = download_target("loreplus-update-setup", "exe");
     download(&app, task, &url, &target).await?;
     log(&app, task, "Starting the installer, the app will restart.");
     std::process::Command::new(&target).args(["/S", "/R"]).spawn().map_err(|e| e.to_string())?;
