@@ -6,7 +6,7 @@ use lore::{CliResult, Server};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Instant;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 // ------------------------------------------------------------------ settings
 
@@ -148,6 +148,17 @@ async fn lore_cli(args: Vec<String>, repository: Option<String>, server_id: Opti
     lore::run(&args, repository.as_deref(), token.as_deref()).await
 }
 
+/// Same as `lore_cli`, and every line of output is sent to the window as a `lore-line` event while it runs.
+#[tauri::command]
+async fn lore_cli_stream(app: AppHandle, args: Vec<String>, repository: Option<String>, server_id: Option<String>, stream_id: String) -> CliResult {
+    let token = server_id.as_deref().and_then(load_token).map(|s| s.token);
+    let id = stream_id.clone();
+    lore::run_stream(&args, repository.as_deref(), token.as_deref(), move |line| {
+        let _ = app.emit("lore-line", json!({ "id": id, "line": line }));
+    })
+    .await
+}
+
 // ------------------------------------------------------------------ admin API
 
 #[tauri::command]
@@ -210,6 +221,7 @@ pub fn run() {
             session_info,
             sign_out,
             lore_cli,
+            lore_cli_stream,
             admin_request,
             server_health,
             system::list_engines,
@@ -228,6 +240,9 @@ pub fn run() {
             system::write_text_file,
             system::path_exists,
             system::delete_folder,
+            system::move_folder,
+            system::set_aside_lore,
+            system::folder_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lore+");

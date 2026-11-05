@@ -50,6 +50,8 @@ export interface Settings {
   accent: string;
   view: "grid" | "list";
   sort: SortKey;
+  /** how big the cards (grid) and the thumbnails (list) are */
+  size: { grid: number; list: number };
   /** repository id -> when the project was last opened here */
   opened: Record<string, number>;
   autoUpdate: { lore: boolean; plugin: boolean; app: boolean };

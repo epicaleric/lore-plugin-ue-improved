@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { AdminUser, CliResult, Engine, Grant, Server, SessionInfo, Settings } from "./types";
 
 export const api = {
@@ -12,6 +13,22 @@ export const api = {
 
   lore: (args: string[], repository?: string | null, serverId?: string | null) =>
     invoke<CliResult>("lore_cli", { args, repository: repository ?? null, serverId: serverId ?? null }),
+
+  /** Runs lore and reports every line of output while it works. */
+  loreStream: async (args: string[], repository: string | null, serverId: string | null, onLine: (line: string) => void) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const stop = await listen<{ id: string; line: string }>("lore-line", (event) => {
+      if (event.payload.id === id) onLine(event.payload.line);
+    });
+    try {
+      return await invoke<CliResult>("lore_cli_stream", { args, repository, serverId, streamId: id });
+    } finally {
+      stop();
+    }
+  },
+  moveFolder: (from: string, toParent: string) => invoke<string>("move_folder", { from, toParent }),
+  setAsideLore: (path: string) => invoke<string>("set_aside_lore", { path }),
+  folderStats: (path: string) => invoke<{ files: number; bytes: number }>("folder_stats", { path }),
 
   health: (server: Server) => invoke<{ lore: { ok: boolean; ms: number }; auth: { ok: boolean; ms: number } }>("server_health", { server }),
 

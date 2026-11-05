@@ -116,7 +116,7 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .gap-s { gap: 8px; }
 .col { display: flex; flex-direction: column; gap: 10px; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 250px), 1fr)); gap: 18px; }
 .project-card { background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; cursor: pointer; display: flex; flex-direction: column; transition: transform 0.14s, border-color 0.14s, box-shadow 0.14s; }
 .project-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); box-shadow: var(--shadow); }
 .thumb { position: relative; aspect-ratio: 1 / 1; background-size: cover; background-position: center; display: grid; place-items: center; }
@@ -254,3 +254,11 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .card-actions { gap: 10px; }
 
 .list-thumb { aspect-ratio: auto; }
+
+.list-row { grid-template-columns: var(--list-thumb, 52px) minmax(160px, 2.2fr) minmax(90px, 0.8fr) minmax(130px, 1.2fr) 110px auto; }
+.list-thumb { width: var(--list-thumb, 52px); height: var(--list-thumb, 52px); border-radius: 10px; }
+.size-slider { width: 110px; accent-color: var(--accent); }
+.progress { height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; margin-top: 6px; }
+.progress > span { display: block; height: 100%; background: var(--grad); border-radius: 3px; transition: width 0.3s; }
+.progress.busy > span { width: 35% !important; animation: slide 1.3s ease-in-out infinite; }
+@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }

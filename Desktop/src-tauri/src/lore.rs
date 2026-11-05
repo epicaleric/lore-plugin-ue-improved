@@ -64,6 +64,10 @@ pub async fn run(args: &[String], repository: Option<&str>, token: Option<&str>)
     if let Some(path) = repository {
         command.arg("--repository").arg(path);
     }
+    // More parallel connections make uploads and downloads much quicker.
+    if matches!(args.first().map(String::as_str), Some("push" | "clone" | "sync")) {
+        command.args(["--max-connections", "8"]);
+    }
     command.args(args);
     command.env("NO_COLOR", "1");
     if let Some(token) = token {
@@ -86,5 +90,68 @@ pub async fn run(args: &[String], repository: Option<&str>, token: Option<&str>)
             stdout: String::new(),
             stderr: format!("Could not start lore: {error}"),
         },
+    }
+}
+
+/// Like `run`, but hands every line of output to `emit` while the command is still working, so the app can show progress.
+pub async fn run_stream<F>(args: &[String], repository: Option<&str>, token: Option<&str>, emit: F) -> CliResult
+where
+    F: Fn(String) + Send + Sync + 'static,
+{
+    use std::sync::Arc;
+    use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+
+    let mut command = Command::new(lore_exe());
+    command.arg("--no-pager").arg("--non-interactive").args(["--event-interval", "500"]);
+    if let Some(path) = repository {
+        command.arg("--repository").arg(path);
+    }
+    if matches!(args.first().map(String::as_str), Some("push" | "clone" | "sync")) {
+        command.args(["--max-connections", "8"]);
+    }
+    command.args(args);
+    command.env("NO_COLOR", "1");
+    if let Some(token) = token {
+        command.env("LORE_IDENTITY_TOKEN", token);
+    }
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            return CliResult { ok: false, code: -1, stdout: String::new(), stderr: format!("Could not start lore: {error}") };
+        }
+    };
+
+    async fn pump<R: AsyncRead + Unpin>(reader: R, emit: Arc<dyn Fn(String) + Send + Sync>) -> String {
+        let mut lines = BufReader::new(reader);
+        let mut all = String::new();
+        let mut buffer = Vec::new();
+        // Progress output often rewrites the same line with a carriage return, so cut on both.
+        while let Ok(read) = lines.read_until(b'\n', &mut buffer).await {
+            if read == 0 {
+                break;
+            }
+            let text = strip_ansi(&String::from_utf8_lossy(&buffer));
+            buffer.clear();
+            for part in text.split(['\r', '\n']).filter(|p| !p.trim().is_empty()) {
+                emit(part.trim().to_string());
+            }
+            all.push_str(&text);
+        }
+        all
+    }
+
+    let emit: Arc<dyn Fn(String) + Send + Sync> = Arc::new(emit);
+    let out = tokio::spawn(pump(child.stdout.take().unwrap(), emit.clone()));
+    let err = tokio::spawn(pump(child.stderr.take().unwrap(), emit));
+    let status = child.wait().await;
+    let stdout = out.await.unwrap_or_default();
+    let stderr = err.await.unwrap_or_default();
+    match status {
+        Ok(status) => CliResult { ok: status.success(), code: status.code().unwrap_or(-1), stdout, stderr },
+        Err(error) => CliResult { ok: false, code: -1, stdout, stderr: format!("{stderr}{error}") },
     }
 }

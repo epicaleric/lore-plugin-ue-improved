@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowLeft, Download, EyeOff, FolderOpen, Lock, Play, RefreshCw, ShieldCheck, Trash2, Users } from "lucide-react";
+import { ArrowLeft, Download, EyeOff, FolderInput, FolderOpen, Lock, Play, RefreshCw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Avatar, Empty, Field, Pill, Spinner, Thumb } from "../components/ui";
 import { api, adminApi } from "../lib/api";
 import { fullDate, timeAgo } from "../lib/format";
-import { layoutDescription, parseHistory } from "../lib/parse";
-import { useProjectActions } from "../lib/actions";
+import { layoutDescription, parseHistory, parseInfo } from "../lib/parse";
+import { invalidateStatus, useProjectActions } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { pluginIsOutdated, useUpdates } from "../lib/updates";
 import type { AdminUser, Grant, LocalProject, Project, Revision } from "../lib/types";
@@ -180,7 +180,44 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
   );
 }
 
+/** Re-links a copy that was moved, or moves it to another folder on the same disk. */
+function useCopyTools(project: Project) {
+  const { settings, update, reload, toast } = useStore();
+  const parentOf = (path: string) => path.replace(/[\\/][^\\/]+$/, "");
+  const covered = (path: string) => settings.roots.some((root) => path.toLowerCase().startsWith(root.toLowerCase()));
+
+  /** Pick the folder of a copy that is somewhere else; its parent is then searched too. */
+  const find = async () => {
+    const chosen = await open({ directory: true, multiple: false, title: `Where is the copy of ${project.name}?` });
+    if (!chosen || Array.isArray(chosen)) return;
+    const info = await api.lore(["repository", "info"], chosen);
+    const id = info.ok ? parseInfo(info.stdout).id : undefined;
+    if (!id) return toast("That folder is not a Lore working copy.", "bad");
+    if (project.id && id !== project.id) return toast("That folder is a copy of another project.", "bad");
+    if (!covered(chosen)) update({ roots: [...settings.roots, parentOf(chosen)] });
+    toast("Found it", "good");
+    invalidateStatus();
+    await reload();
+  };
+
+  const move = async (copy: LocalProject) => {
+    const target = await open({ directory: true, multiple: false, title: `Move ${project.name} into which folder?` });
+    if (!target || Array.isArray(target)) return;
+    try {
+      const moved = await api.moveFolder(copy.path, target);
+      if (!covered(moved)) update({ roots: [...settings.roots, target] });
+      toast("The copy was moved", "good");
+      invalidateStatus();
+      await reload();
+    } catch (error) {
+      toast(String(error), "bad");
+    }
+  };
+  return { find, move };
+}
+
 function Copies({ project }: { project: Project }) {
+  const { move } = useCopyTools(project);
   const { deleteLocal, hide } = useDeletes();
   const [ask, setAsk] = useState<LocalProject | null>(null);
   const all = project.local ? [project.local, ...project.copies] : [];
@@ -196,6 +233,7 @@ function Copies({ project }: { project: Project }) {
             <td style={{ width: 300, textAlign: "right" }}>
               <div className="row gap-s" style={{ justifyContent: "flex-end" }}>
                 <button className="btn small" onClick={() => api.openPath(copy.path)}><FolderOpen size={14} /> Folder</button>
+                <button className="btn small" onClick={() => move(copy)}><FolderInput size={14} /> Move</button>
                 <button className="btn small" onClick={() => hide(copy)}><EyeOff size={14} /> Hide</button>
                 <button className="btn small danger" onClick={() => setAsk(copy)}><Trash2 size={14} /> Delete</button>
               </div>
@@ -251,6 +289,7 @@ export function ProjectDetail() {
   const project = projects.find((p) => p.key === projectKey);
   const [tab, setTab] = useState<Tab>("overview");
   const view = useProjectView(project ?? { key: "", name: "", onServer: false, copies: [] });
+  const copyTools = useCopyTools(project ?? { key: "", name: "", onServer: false, copies: [] });
   if (!project) return <Empty icon={<FolderOpen size={28} />} title="Project not found"><button className="btn" onClick={() => go("projects")}>Back to projects</button></Empty>;
 
   const working = busy[project.key];
@@ -263,7 +302,7 @@ export function ProjectDetail() {
     <>
       <div className="topbar" style={{ paddingBottom: 6 }}>
         <button className="btn icon ghost" onClick={() => go("projects")} title="Back"><ArrowLeft size={18} /></button>
-        <Thumb name={view.name} image={view.thumbnail} className="list-thumb" style={{ width: 84, height: 52 }} />
+        <Thumb name={view.name} image={view.thumbnail} className="list-thumb" style={{ width: 56, height: 56 }} />
         <div>
           <h1>{view.name}</h1>
           <div className="row gap-s" style={{ marginTop: 4 }}>
@@ -280,7 +319,10 @@ export function ProjectDetail() {
             <button className="btn primary" onClick={() => openProject(project)}><Play size={16} /> Open in Unreal</button>
           </>
         ) : project.onServer ? (
-          <button className="btn primary" disabled={!!working} onClick={() => clone(project)}>{working ? <Spinner /> : <Download size={16} />} Clone to this PC</button>
+          <>
+            <button className="btn" onClick={copyTools.find}><Search size={16} /> I have a copy</button>
+            <button className="btn primary" disabled={!!working} onClick={() => clone(project)}>{working ? <Spinner /> : <Download size={16} />} Clone to this PC</button>
+          </>
         ) : null}
       </div>
       <div className="content">
@@ -311,7 +353,7 @@ export function ProjectDetail() {
               <div className="panel">
                 <h3>On this PC</h3>
                 <table className="table"><tbody>
-                  <tr><td className="muted" style={{ width: 170 }}>Folder</td><td className="mono">{project.local.path}</td></tr>
+                  <tr><td className="muted" style={{ width: 170 }}>Folder</td><td><div className="row"><span className="mono" style={{ flex: 1 }}>{project.local.path}</span><button className="btn small" onClick={() => copyTools.move(project.local!)}><FolderInput size={14} /> Move</button><button className="btn small" onClick={copyTools.find}><Search size={14} /> Find</button></div></td></tr>
                   <tr><td className="muted">Revision</td><td>{view.status ? `${view.status.localRevision} of ${view.status.remoteRevision} on the server` : "-"}</td></tr>
                   <tr><td className="muted">Changed files</td><td>{view.status?.changes ?? "-"}</td></tr>
                   <tr><td className="muted">Lore plugin</td><td>

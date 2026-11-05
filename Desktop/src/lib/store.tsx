@@ -24,6 +24,7 @@ export const defaultSettings: Settings = {
   accent: "#1ab6ff",
   view: "grid",
   sort: "name",
+  size: { grid: 250, list: 52 },
   opened: {},
   autoUpdate: { lore: true, plugin: true, app: true },
 };
@@ -229,7 +230,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       const saved: Partial<Settings> = await api.getSettings().catch(() => ({}));
-      const merged = { ...defaultSettings, ...saved, accent: !saved.accent || saved.accent === "#14a0a5" ? defaultSettings.accent : saved.accent, autoUpdate: { ...defaultSettings.autoUpdate, ...(saved.autoUpdate ?? {}) } } as Settings;
+      const merged = { ...defaultSettings, ...saved, accent: !saved.accent || saved.accent === "#14a0a5" ? defaultSettings.accent : saved.accent, size: { ...defaultSettings.size, ...(saved.size ?? {}) }, autoUpdate: { ...defaultSettings.autoUpdate, ...(saved.autoUpdate ?? {}) } } as Settings;
       settingsRef.current = merged;
       setSettings(merged);
       setReady(true);

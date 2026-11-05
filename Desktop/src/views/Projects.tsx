@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowDownToLine, ArrowUpFromLine, Boxes, Check, CloudOff, Download, FilePen, FolderOpen, FolderPlus, Grid2x2, List, Play, RefreshCw, Search, Server as ServerIcon, Star, UploadCloud } from "lucide-react";
 import { Avatar, Empty, Pill, Spinner, Thumb, useMenu } from "../components/ui";
@@ -34,9 +34,9 @@ export function StatusPill({ project, status }: { project: Project; status: Retu
   if (status === undefined) return <Pill tone="muted"><Spinner size={11} /> Checking</Pill>;
   if (!status) return <Pill tone="muted">Unknown</Pill>;
   const behind = status.remoteRevision - status.localRevision;
-  if (behind > 0) return <Pill tone="warn" title={`You have revision ${status.localRevision}, the server has ${status.remoteRevision}`}><ArrowDownToLine size={12} /> Revision {status.localRevision} of {status.remoteRevision}</Pill>;
+  if (behind > 0) return <Pill tone="warn" title={`You have revision ${status.localRevision}, the server has ${status.remoteRevision}`}><ArrowDownToLine size={12} /> v{status.localRevision} of v{status.remoteRevision}</Pill>;
   if (behind < 0) return <Pill tone="info" title="Versions on this PC that are not on the server yet"><ArrowUpFromLine size={12} /> {-behind} to send</Pill>;
-  return <Pill tone="good" title="You have the latest revision"><Check size={12} /> Revision {status.remoteRevision} · latest</Pill>;
+  return <Pill tone="good" title={`Revision ${status.remoteRevision}, you have the latest`}><Check size={12} /> v{status.remoteRevision}</Pill>;
 }
 
 /** Small overlapping avatars of everybody who saved a version. */
@@ -160,15 +160,15 @@ function ListRow({ project, onOpen }: { project: Project; onOpen: () => void }) 
       <div style={{ minWidth: 0 }}>
         <div className="title-row">
           <div className="card-title">{view.name}</div>
-          <AuthorStack path={project.local?.path} />
           <CategoryTag project={project} />
         </div>
+        <div className="card-meta small" style={{ marginTop: 2 }}>{view.engine ? `Unreal ${view.engine}` : "Engine unknown"}</div>
       </div>
-      <div className="muted">{view.engine ? `UE ${view.engine}` : "-"}</div>
-      <div><StatusPill project={project} status={view.status} /></div>
+      <div className="row" style={{ gap: 6 }}><StatusPill project={project} status={view.status} /></div>
       <div className="muted" style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {view.last ? `${view.last.author}, ${timeAgo(view.last.date)}` : ""}
       </div>
+      <div><AuthorStack path={project.local?.path} /></div>
       <div onClick={(e) => e.stopPropagation()}>
         {project.local ? (
           <div className="row" style={{ gap: 10 }}>
@@ -190,6 +190,24 @@ export function Projects() {
   const [signIn, setSignIn] = useState(false);
   const [adding, setAdding] = useState(false);
   useCacheVersion();
+  const grid = settings.view === "grid";
+  const size = grid ? settings.size.grid : settings.size.list;
+  const [min, max] = grid ? [180, 420] : [36, 110];
+  const setSize = (value: number) => {
+    const next = Math.max(min, Math.min(max, Math.round(value)));
+    update({ size: { ...settings.size, [grid ? "grid" : "list"]: next } });
+  };
+  const sizeRef = useRef({ size, setSize });
+  sizeRef.current = { size, setSize };
+  useEffect(() => {
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      sizeRef.current.setSize(sizeRef.current.size + (event.deltaY < 0 ? 1 : -1) * (grid ? 20 : 6));
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [grid]);
 
   const categoryIds = useMemo(() => {
     if (category === "all") return null;
@@ -245,6 +263,7 @@ export function Projects() {
         </div>
         <div className="spacer" />
         <label className="search"><Search size={16} /><input placeholder="Search projects" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+        <input className="size-slider" type="range" min={min} max={max} value={size} onChange={(e) => setSize(Number(e.target.value))} title="Size (also Ctrl + scroll)" />
         <select className="select sort" value={settings.sort} onChange={(e) => update({ sort: e.target.value as SortKey })} title="Sort">
           <option value="name">Name</option>
           <option value="opened">Recently opened</option>
@@ -258,7 +277,7 @@ export function Projects() {
         </div>
         <button className="btn primary" onClick={() => setAdding(true)}><FolderPlus size={16} /> Add project</button>
       </div>
-      <div className="content">
+      <div className="content" style={{ ["--card-min" as string]: `${settings.size.grid}px`, ["--list-thumb" as string]: `${settings.size.list}px` }}>
         <div className="row wrap" style={{ gap: 6, marginBottom: 18 }}>
           {chip("all", "All")}
           {chip("local", "On this PC")}

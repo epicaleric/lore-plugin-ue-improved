@@ -460,3 +460,56 @@ impl HiddenWindow for Command {
     }
 }
 
+
+/// Moves a working copy to another folder on the same disk. Nothing is copied or deleted.
+#[tauri::command]
+pub fn move_folder(from: String, to_parent: String) -> Result<String, String> {
+    let source = Path::new(&from);
+    if !source.join(".lore").exists() {
+        return Err("This folder is not a Lore working copy, so it was not touched.".into());
+    }
+    let name = source.file_name().ok_or("The folder has no name.")?;
+    let target = Path::new(&to_parent).join(name);
+    if target.exists() {
+        return Err(format!("{} already exists.", target.display()));
+    }
+    std::fs::rename(source, &target).map_err(|e| format!("Could not move the folder ({e}). Moving works within one disk; for another disk, move it in Explorer and use Find a copy."))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+/// Puts the `.lore` folder of a working copy aside, under a new name, so nothing is lost.
+#[tauri::command]
+pub fn set_aside_lore(path: String) -> Result<String, String> {
+    let lore = Path::new(&path).join(".lore");
+    if !lore.exists() {
+        return Ok(String::new());
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let target = Path::new(&path).join(format!(".lore.old-{stamp}"));
+    std::fs::rename(&lore, &target).map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+/// Number of files and bytes that would go into a project, leaving out generated folders.
+#[tauri::command]
+pub fn folder_stats(path: String) -> Value {
+    fn walk(dir: &Path, files: &mut u64, bytes: &mut u64) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if path.is_dir() {
+                if ["Saved", "Intermediate", "DerivedDataCache", "Binaries", "Builds", ".lore", ".git", ".vs", ".idea", ".vscode"].contains(&name.as_str()) || name.starts_with(".lore.old") {
+                    continue;
+                }
+                walk(&path, files, bytes);
+            } else if let Ok(meta) = entry.metadata() {
+                *files += 1;
+                *bytes += meta.len();
+            }
+        }
+    }
+    let (mut files, mut bytes) = (0u64, 0u64);
+    walk(Path::new(&path), &mut files, &mut bytes);
+    json!({ "files": files, "bytes": bytes })
+}
