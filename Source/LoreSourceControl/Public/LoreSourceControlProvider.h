@@ -128,6 +128,9 @@ private:
 	/** Absolute paths saved since the last Tick, awaiting a debounced status refresh. */
 	TArray<FString> PackagesToRefresh;
 
+	/** Absolute paths saved since the last Tick that should be checked out automatically. */
+	TSet<FString> PackagesToCheckOut;
+
 	/** Handle for the PackageSavedWithContextEvent subscription. */
 	FDelegateHandle OnPackageSavedHandle;
 };

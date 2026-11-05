@@ -18,6 +18,13 @@
 #include "Misc/App.h"
 #include "Misc/QueuedThreadPool.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/IConsoleManager.h"
+
+/** Check out (and lock) files as soon as they are saved, so edits never race another user. */
+static TAutoConsoleVariable<bool> CVarLoreAutoCheckOutOnSave(
+	TEXT("Lore.AutoCheckOutOnSave"),
+	true,
+	TEXT("Automatically check out and lock a file in Lore when it is saved in the editor."));
 #include "UObject/Package.h"
 #include "UObject/ObjectSaveContext.h"
 
@@ -144,6 +151,21 @@ void FLoreSourceControlProvider::HandlePackageSaved(const FString& InPackageFile
 	// PackageSavedWithContextEvent fires once per asset (hundreds for OFPA maps),
 	// so coalesce into a single batched refresh on the next Tick.
 	PackagesToRefresh.AddUnique(AbsoluteFilename);
+
+	// Queue an automatic checkout unless another user already holds the lock.
+	// Files we already hold are skipped, so repeated saves do not re-request the lock.
+	if (CVarLoreAutoCheckOutOnSave.GetValueOnGameThread()
+		&& State->LockState != ELoreLockState::LockedByMe
+		&& State->LockState != ELoreLockState::LockedByOther)
+	{
+		PackagesToCheckOut.Add(AbsoluteFilename);
+		UE_LOG(LogLoreSourceControl, Log, TEXT("Auto checkout queued after save: %s"), *AbsoluteFilename);
+	}
+	else
+	{
+		UE_LOG(LogLoreSourceControl, Log, TEXT("Auto checkout skipped after save (enabled=%d, lock state=%d): %s"),
+			CVarLoreAutoCheckOutOnSave.GetValueOnGameThread() ? 1 : 0, static_cast<int32>(State->LockState), *AbsoluteFilename);
+	}
 }
 
 FText FLoreSourceControlProvider::GetStatusText() const
@@ -371,6 +393,14 @@ void FLoreSourceControlProvider::OutputCommandMessages(const FLoreSourceControlC
 
 void FLoreSourceControlProvider::Tick()
 {
+	// Send queued auto-checkouts as one batch, once no other command is running.
+	if (!PackagesToCheckOut.IsEmpty() && CommandQueue.IsEmpty())
+	{
+		TArray<FString> Files = PackagesToCheckOut.Array();
+		PackagesToCheckOut.Empty();
+		Execute(ISourceControlOperation::Create<FCheckOut>(), nullptr, Files, EConcurrency::Asynchronous);
+	}
+
 	bool bStatesUpdated = false;
 	for (int32 CommandIndex = 0; CommandIndex < CommandQueue.Num(); ++CommandIndex)
 	{

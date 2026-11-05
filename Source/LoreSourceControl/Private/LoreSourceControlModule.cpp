@@ -1,12 +1,25 @@
 #include "LoreSourceControlModule.h"
 #include "LoreSourceControlOperations.h"
 #include "LoreSourceControlLog.h"
+#include "LoreHistoryTab.h"
 
 #include "Features/IModularFeatures.h"
+#include "HAL/IConsoleManager.h"
 #include "Modules/ModuleManager.h"
 #include "Misc/App.h"
 
 #define LOCTEXT_NAMESPACE "LoreSourceControl"
+
+/** Console commands `Lore.ShowHistory` / `Lore.ShowLocks`: open the Lore History window. */
+static FAutoConsoleCommand GLoreShowHistoryCommand(
+	TEXT("Lore.ShowHistory"),
+	TEXT("Open the Lore History window (revisions, restore, locked files)."),
+	FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>&) { LoreHistoryTab::Open(); }));
+
+static FAutoConsoleCommand GLoreShowLocksCommand(
+	TEXT("Lore.ShowLocks"),
+	TEXT("Open the Lore History window (revisions, restore, locked files)."),
+	FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>&) { LoreHistoryTab::Open(); }));
 
 template<typename Type>
 static TSharedRef<ILoreSourceControlWorker, ESPMode::ThreadSafe> CreateWorker()
@@ -23,11 +36,15 @@ void FLoreSourceControlModule::StartupModule()
 	// Bind our provider to the editor's modular source-control feature.
 	IModularFeatures::Get().RegisterModularFeature("SourceControl", &LoreProvider);
 
+	LoreHistoryTab::Register();
+
 	UE_LOG(LogLoreSourceControl, Log, TEXT("Lore source control module started."));
 }
 
 void FLoreSourceControlModule::ShutdownModule()
 {
+	LoreHistoryTab::Unregister();
+
 	LoreProvider.Close();
 
 	IModularFeatures::Get().UnregisterModularFeature("SourceControl", &LoreProvider);

@@ -7,8 +7,10 @@
 #include "LoreSourceControlLog.h"
 #include "LorePathUtils.h"
 
+#include "HAL/CriticalSection.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
+#include "Misc/ScopeLock.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -743,6 +745,45 @@ void ParseHistoryResults(
 	}
 
 	FinalizeCurrent();
+}
+
+FString DetectAuthenticatedUser(const FLoreCommandContext& InContext)
+{
+	static FCriticalSection Mutex;
+	static FString Cached;
+	static int32 Attempts = 0;
+
+	FScopeLock ScopeLock(&Mutex);
+	if (!Cached.IsEmpty() || Attempts >= 3)
+	{
+		return Cached;
+	}
+	++Attempts;
+
+	TArray<FString> Results;
+	TArray<FString> Errors;
+	int32 ReturnCode = -1;
+	if (RunCommand(TEXT("auth info"), TArray<FString>(), TArray<FString>(), InContext, Results, Errors, ReturnCode))
+	{
+		FString Id;
+		FString Name;
+		for (const FString& Line : Results)
+		{
+			const FString Clean = StripAnsi(Line).TrimStartAndEnd();
+			int32 Colon = INDEX_NONE;
+			if (!Clean.FindChar(TEXT(':'), Colon))
+			{
+				continue;
+			}
+			const FString Key = Clean.Left(Colon).TrimStartAndEnd();
+			const FString Value = Clean.Mid(Colon + 1).TrimStartAndEnd();
+			if (Key.Equals(TEXT("Name"), ESearchCase::IgnoreCase)) { Name = Value; }
+			else if (Key.Equals(TEXT("ID"), ESearchCase::IgnoreCase)) { Id = Value; }
+		}
+		Cached = Name.IsEmpty() ? Id : Name;
+		UE_LOG(LogLoreSourceControl, Log, TEXT("Detected Lore user: '%s'"), *Cached);
+	}
+	return Cached;
 }
 
 void ApplyLocksToStates(

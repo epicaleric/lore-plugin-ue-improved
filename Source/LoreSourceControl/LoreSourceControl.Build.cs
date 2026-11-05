@@ -14,13 +14,17 @@ public class LoreSourceControl : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
+			"ApplicationCore",
 			"CoreUObject",
 			"Engine",
 			"Slate",
 			"SlateCore",
 			"InputCore",
 			"Projects",
-			"UnrealEd"
+			"UnrealEd",
+			"HTTP",
+			"Json",
+			"WorkspaceMenuStructure"
 		});
 
 		// The Lore provider drives the public `lore` CLI as a child process,

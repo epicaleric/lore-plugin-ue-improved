@@ -79,6 +79,13 @@ namespace LoreSourceControlUtils
 		FLoreRepoStatus& OutRepoStatus,
 		TArray<FLoreSourceControlState>& OutStates);
 
+	/**
+	 * The name of the user the `lore` CLI is logged in as (from `lore auth info`),
+	 * cached. Locks are reported under this name once the auth server is enabled.
+	 * Returns an empty string if it cannot be determined.
+	 */
+	FString DetectAuthenticatedUser(const FLoreCommandContext& InContext);
+
 	/** Parse `lore lock query` output into lock records. */
 	void ParseLockQueryResults(const TArray<FString>& InResults, TArray<FLoreLockInfo>& OutLocks);
 

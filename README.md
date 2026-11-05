@@ -84,6 +84,34 @@ refresh so freshly edited files show the correct state without a manual refresh.
   completion or time out.
 - Changelists, shelve/unshelve, and cross-branch state warnings are not implemented.
 
+## Lore History window (extra features)
+
+Open it from **Window > Developer Tools > Lore History**, or with the console command `Lore.ShowHistory`.
+It is modelled on the Branch History / Check-in windows of UEFN's revision control.
+
+- **History** - a timeline of revisions with author, date and description. Expand a revision to see the
+  changed files (added / modified / deleted). Right-click a file for **History**, **Undo this change** and
+  **Copy path**. Filter by author, text, date or number. **Undo** reverts a whole revision and the download
+  button puts the whole project back to that revision. Both create a *new* revision, so history is never rewritten.
+- **Changes** - a check-in window: pick the changed files, write a description and **Submit**
+  (stage, commit and push in one step). Optionally keep files checked out.
+- **Description with Gemini (optional)** - press **Generate** to let the Google Gemini API write the
+  description from the file names and change types (never file contents). The API key is typed by you and
+  stored only in `Saved/Config` on your machine. Description language: English or Dutch.
+- **Locks** - who has which file checked out, with **Unlock** (and **Unlock all mine**).
+- **Sync Latest** - shown when the server has newer revisions.
+
+Other changes:
+
+- The plugin now detects the logged-in Lore user (`lore auth info`) so locks reported under that name are
+  recognised as yours when a server with authentication is used.
+- Locks are released one file at a time after a submit, because `lore lock release` stops at the first file
+  that is not locked.
+- A submit moves the branch head onto the new revision (`lore branch reset`) before pushing.
+- Auto check-out after saving an asset (console variable `Lore.AutoCheckOutOnSave`, default on).
+
+Tested on Unreal Engine 5.8 only; the new window uses standard Slate APIs but has not been built on 5.5 to 5.7.
+
 ## License
 
 Released under the MIT License. See [LICENSE](LICENSE).

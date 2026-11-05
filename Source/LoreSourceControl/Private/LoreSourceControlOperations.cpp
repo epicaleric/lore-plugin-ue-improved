@@ -113,7 +113,9 @@ namespace
 
 			TArray<FLoreLockInfo> Locks;
 			LoreSourceControlUtils::ParseLockQueryResults(LockResults, Locks);
-			LoreSourceControlUtils::ApplyLocksToStates(Locks, Command.UserName, Command.WorkingCopyRoot, OutStates);
+			// Locks carry the authenticated user's name; fall back to it when no identity is configured.
+			const FString LockUser = Command.UserName.IsEmpty() ? LoreSourceControlUtils::DetectAuthenticatedUser(Context) : Command.UserName;
+			LoreSourceControlUtils::ApplyLocksToStates(Locks, LockUser, Command.WorkingCopyRoot, OutStates);
 		}
 
 		// Diagnostic: report what we computed for each requested file so we can see
@@ -257,11 +259,14 @@ bool FLoreCheckOutWorker::Execute(FLoreSourceControlCommand& InCommand)
 {
 	const LoreSourceControlUtils::FLoreCommandContext Context = LoreSourceControlUtils::MakeContext(InCommand);
 	const TArray<FString> RelativeFiles = ToRelativePaths(InCommand.Files, InCommand.WorkingCopyRoot);
+	UE_LOG(LogLoreSourceControl, Log, TEXT("CheckOut: %d file(s) received, %d inside the workspace: %s"),
+		InCommand.Files.Num(), RelativeFiles.Num(), *FString::Join(RelativeFiles, TEXT(", ")));
 
 	TArray<FString> Results;
 	const bool bOk = LoreSourceControlUtils::RunCommandBatched(
 		TEXT("lock acquire"), TArray<FString>(), RelativeFiles, Context, /*bUseTargetsFile=*/false,
 		Results, InCommand.ErrorMessages);
+	UE_LOG(LogLoreSourceControl, Log, TEXT("CheckOut: lock acquire %s"), bOk ? TEXT("succeeded") : TEXT("FAILED"));
 
 	if (!bOk)
 	{
@@ -360,10 +365,14 @@ bool FLoreRevertWorker::Execute(FLoreSourceControlCommand& InCommand)
 		ResetResults, InCommand.ErrorMessages);
 
 	// Release any locks we hold (best effort; not having a lock is not an error).
-	TArray<FString> ReleaseResults;
-	LoreSourceControlUtils::RunCommandBatched(
-		TEXT("lock release"), TArray<FString>(), RelativeFiles, Context, /*bUseTargetsFile=*/false,
-		ReleaseResults, InCommand.ErrorMessages);
+	// One file per call: Lore stops at the first file that is not locked.
+	for (const FString& RelativeFile : RelativeFiles)
+	{
+		TArray<FString> ReleaseResults;
+		TArray<FString> ReleaseErrors;
+		int32 ReleaseCode = -1;
+		LoreSourceControlUtils::RunCommand(TEXT("lock release"), TArray<FString>(), { RelativeFile }, Context, ReleaseResults, ReleaseErrors, ReleaseCode);
+	}
 
 	RefreshFileStates(InCommand, /*bScan=*/true, /*bWithHistory=*/false, OutStates, nullptr);
 	return true;
@@ -449,6 +458,8 @@ bool FLoreCheckInWorker::Execute(FLoreSourceControlCommand& InCommand)
 	}
 
 	const TArray<FString> RelativeFiles = ToRelativePaths(InCommand.Files, InCommand.WorkingCopyRoot);
+	UE_LOG(LogLoreSourceControl, Log, TEXT("CheckIn: %d file(s) received, %d inside the workspace: %s"),
+		InCommand.Files.Num(), RelativeFiles.Num(), *FString::Join(RelativeFiles, TEXT(", ")));
 
 	// Stage.
 	{
@@ -474,6 +485,10 @@ bool FLoreCheckInWorker::Execute(FLoreSourceControlCommand& InCommand)
 	// Escape embedded quotes so the message survives the command line.
 	Description.ReplaceInline(TEXT("\""), TEXT("\\\""));
 
+	// `lore commit` writes the new revision but does not move the branch head,
+	// and leaves the staged state behind. Read the new revision's signature,
+	// clear the staged state, move the head onto that revision, then push.
+	FString Signature;
 	{
 		TArray<FString> Results;
 		int32 ReturnCode = -1;
@@ -482,6 +497,41 @@ bool FLoreCheckInWorker::Execute(FLoreSourceControlCommand& InCommand)
 		if (!LoreSourceControlUtils::RunCommand(TEXT("commit"), Params, TArray<FString>(), Context, Results, InCommand.ErrorMessages, ReturnCode))
 		{
 			InCommand.ErrorMessages.Add(TEXT("`lore commit` failed."));
+			return false;
+		}
+
+		for (const FString& Line : Results)
+		{
+			const FString Clean = LoreSourceControlUtils::StripAnsi(Line).TrimStartAndEnd();
+			int32 Colon = INDEX_NONE;
+			if (Clean.StartsWith(TEXT("Signature")) && Clean.FindChar(TEXT(':'), Colon))
+			{
+				Signature = Clean.Mid(Colon + 1).TrimStartAndEnd();
+			}
+		}
+
+		if (Signature.IsEmpty())
+		{
+			InCommand.ErrorMessages.Add(TEXT("Commit completed but no revision signature was reported."));
+			return false;
+		}
+	}
+
+	// Clear the staged state so the branch head can move.
+	{
+		TArray<FString> Results;
+		LoreSourceControlUtils::RunCommandBatched(TEXT("unstage"), TArray<FString>(), RelativeFiles, Context, /*bUseTargetsFile=*/true, Results, InCommand.ErrorMessages);
+	}
+
+	// Move the local branch head onto the new revision.
+	{
+		TArray<FString> Results;
+		int32 ReturnCode = -1;
+		TArray<FString> Params;
+		Params.Add(Signature);
+		if (!LoreSourceControlUtils::RunCommand(TEXT("branch reset"), Params, TArray<FString>(), Context, Results, InCommand.ErrorMessages, ReturnCode))
+		{
+			InCommand.ErrorMessages.Add(TEXT("`lore branch reset` failed. The revision is committed locally but not pushed."));
 			return false;
 		}
 	}
@@ -500,7 +550,16 @@ bool FLoreCheckInWorker::Execute(FLoreSourceControlCommand& InCommand)
 	// Release locks for the submitted files now they are at head.
 	{
 		TArray<FString> Results;
-		LoreSourceControlUtils::RunCommandBatched(TEXT("lock release"), TArray<FString>(), RelativeFiles, Context, /*bUseTargetsFile=*/false, Results, InCommand.ErrorMessages);
+		// One file per call: Lore stops at the first file that is not locked (for example a source file).
+		bool bReleased = true;
+		for (const FString& RelativeFile : RelativeFiles)
+		{
+			TArray<FString> ReleaseResults;
+			TArray<FString> ReleaseErrors;
+			int32 ReleaseCode = -1;
+			bReleased &= LoreSourceControlUtils::RunCommand(TEXT("lock release"), TArray<FString>(), { RelativeFile }, Context, ReleaseResults, ReleaseErrors, ReleaseCode);
+		}
+		UE_LOG(LogLoreSourceControl, Log, TEXT("CheckIn: lock release %s for %d file(s)"), bReleased ? TEXT("succeeded") : TEXT("FAILED"), RelativeFiles.Num());
 	}
 
 	if (InCommand.Operation->GetName() == "CheckIn")
