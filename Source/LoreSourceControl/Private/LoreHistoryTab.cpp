@@ -785,7 +785,7 @@ namespace
 	FSlateColor ContrastFor(const FLinearColor& InBackground)
 	{
 		const float Luminance = 0.2126f * InBackground.R + 0.7152f * InBackground.G + 0.0722f * InBackground.B;
-		return Luminance > 0.55f ? FSlateColor(FLinearColor(0.01f, 0.01f, 0.012f, 1.0f)) : FSlateColor(FLinearColor::White);
+		return Luminance > 0.33f ? FSlateColor(FLinearColor(0.01f, 0.01f, 0.012f, 1.0f)) : FSlateColor(FLinearColor::White);
 	}
 
 	void ApplyAccent(const FString& InValue)
@@ -1356,15 +1356,19 @@ public:
 		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), &ButtonPill, ESlateDrawEffect::None, Fill);
 
 		const FLinearColor Ink = ContrastFor(Accent).GetSpecifiedColor().CopyWithNewOpacity(Fade);
-		DrawSparkle(OutDrawElements, LayerId + 1, AllottedGeometry, FVector2f(18.0f, Size.Y * 0.5f + 1.0f), 5.0f, Ink);
-		DrawSparkle(OutDrawElements, LayerId + 1, AllottedGeometry, FVector2f(26.0f, Size.Y * 0.5f - 5.0f), 2.6f, Ink);
-
-		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 10);
+		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 9);
 		const FString Label = bBusy ? TEXT("Working...") : TEXT("Generate");
 		const TSharedRef<FSlateFontMeasure> Measure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
 		const FVector2f TextSize = Measure->Measure(Label, Font);
+
+		// Sparkles and text as one group, centred in the pill.
+		constexpr float StarsWidth = 15.0f;
+		constexpr float Gap = 6.0f;
+		const float Left = FMath::RoundToFloat((Size.X - (StarsWidth + Gap + TextSize.X)) * 0.5f);
+		DrawSparkle(OutDrawElements, LayerId + 1, AllottedGeometry, FVector2f(Left + 4.5f, Size.Y * 0.5f + 1.0f), 4.5f, Ink);
+		DrawSparkle(OutDrawElements, LayerId + 1, AllottedGeometry, FVector2f(Left + 12.5f, Size.Y * 0.5f - 4.0f), 2.4f, Ink);
 		FSlateDrawElement::MakeText(OutDrawElements, LayerId + 1,
-			AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(36.0f, (Size.Y - TextSize.Y) * 0.5f))),
+			AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(Left + StarsWidth + Gap, (Size.Y - TextSize.Y) * 0.5f))),
 			Label, Font, ESlateDrawEffect::None, Ink);
 		return LayerId + 1;
 	}
@@ -1389,8 +1393,8 @@ public:
 	}
 
 private:
-	static constexpr float Width = 112.0f;
-	static constexpr float Height = 30.0f;
+	static constexpr float Width = 96.0f;
+	static constexpr float Height = 26.0f;
 
 	static FLinearColor ShiftHue(const FLinearColor& InColor, float InDegrees)
 	{
@@ -3135,6 +3139,13 @@ private:
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				MakeSettingRow(LOCTEXT("SettingAccent", "Accent colour"),
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 14.0f, 0.0f)
+					[
+						SNew(SBox).WidthOverride(30.0f).HeightOverride(30.0f)[ SNew(SBorder).BorderImage(&AvatarBrush).Padding(0.0f).BorderBackgroundColor_Lambda([]() { return FSlateColor(Accent); }) ]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
 					MakeColorChooser(
 						[this]() { return AccentId; },
 						[this](const FString& InValue)
@@ -3143,7 +3154,9 @@ private:
 							SaveUiSetting(TEXT("Accent"), InValue);
 							ApplyAccent(InValue);
 							Invalidate(EInvalidateWidgetReason::Paint);
-						}))
+						})
+					]
+				)
 			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
@@ -3209,7 +3222,7 @@ private:
 							.ToolTipText(LOCTEXT("CopyServerTip", "Copy the server address"))
 							.OnClicked_Lambda([this]() { FPlatformApplicationMisc::ClipboardCopy(*Server.RemoteUrl); return FReply::Handled(); })
 						[
-							MakeIcon("Icons.Copy", FLinearColor::White, 16.0f)
+							MakeIcon("GenericCommands.Copy", FLinearColor::White, 16.0f)
 						]
 					])
 			]
