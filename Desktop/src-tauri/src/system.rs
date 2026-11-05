@@ -221,6 +221,9 @@ pub fn write_text_file(path: String, contents: String, overwrite: bool) -> Resul
     if target.exists() && !overwrite {
         return Ok(false);
     }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     std::fs::write(target, contents).map_err(|e| e.to_string())?;
     Ok(true)
 }
@@ -326,7 +329,7 @@ pub async fn install_app_update(app: AppHandle, url: String) -> Result<(), Strin
     let target = std::env::temp_dir().join("lorehub-update-setup.exe");
     download(&app, task, &url, &target).await?;
     log(&app, task, "Starting the installer, the app will restart.");
-    std::process::Command::new(&target).arg("/S").spawn().map_err(|e| e.to_string())?;
+    std::process::Command::new(&target).args(["/S", "/R"]).spawn().map_err(|e| e.to_string())?;
     tokio::time::sleep(std::time::Duration::from_millis(600)).await;
     app.exit(0);
     Ok(())

@@ -12,57 +12,76 @@ async function folder(server: Server) {
   return api.metaDir(server.id);
 }
 
-/** Brings the local copy up to date and returns what is in it. */
-export async function pullShared(server: Server): Promise<SharedConfig | null> {
-  const dir = await folder(server);
-  if (await api.exists(`${dir}\.lore`)) {
+/** Windows accepts forward slashes, which keeps backslash escapes out of the way. */
+const at = (dir: string, name: string) => `${dir}/${name}`;
+
+// Clone, sync and push all use the same folder, so they run one after the other.
+let queue: Promise<unknown> = Promise.resolve();
+function inOrder<T>(work: () => Promise<T>): Promise<T> {
+  const next = queue.then(work, work);
+  queue = next.catch(() => {});
+  return next;
+}
+
+async function bringUpToDate(server: Server, dir: string) {
+  if (await api.exists(at(dir, ".lore"))) {
     const synced = await api.lore(["sync"], dir, server.id);
     if (!synced.ok) throw fail(synced);
   } else {
     const cloned = await api.lore(["clone", `${server.loreUrl}/${SHARED_NAME}`, dir], null, server.id);
     if (!cloned.ok) throw fail(cloned);
   }
-  const text = await api.readText(`${dir}\${FILE}`);
-  if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    return { version: 1, categories: parsed.categories ?? [], assignments: parsed.assignments ?? {} };
-  } catch {
-    return null;
-  }
 }
 
-/** Writes the file and sends it to the server. Syncs first so other people's changes are not lost. */
-export async function pushShared(server: Server, config: SharedConfig): Promise<void> {
-  const dir = await folder(server);
-  if (!(await api.exists(`${dir}\.lore`))) await pullShared(server);
-  else {
-    const synced = await api.lore(["sync"], dir, server.id);
-    if (!synced.ok) throw fail(synced);
-  }
-  await api.writeText(`${dir}\${FILE}`, JSON.stringify(config, null, 2) + "\n");
-  const staged = await api.lore(["stage", "."], dir, server.id);
+/** Brings the local copy up to date and returns what is in it, or null when nothing was saved there yet. */
+export function pullShared(server: Server): Promise<SharedConfig | null> {
+  return inOrder(async () => {
+    const dir = await folder(server);
+    await bringUpToDate(server, dir);
+    const text = await api.readText(at(dir, FILE));
+    if (!text) return null;
+    try {
+      const parsed = JSON.parse(text);
+      return { version: 1, categories: parsed.categories ?? [], assignments: parsed.assignments ?? {} } as SharedConfig;
+    } catch {
+      return null;
+    }
+  });
+}
+
+async function saveAndSend(server: Server, dir: string, config: SharedConfig, message: string) {
+  await api.writeText(at(dir, FILE), JSON.stringify(config, null, 2) + "\n");
+  // `stage .` only takes files that are marked as changed already, so let Lore scan the folder.
+  const staged = await api.lore(["stage", "--scan", "."], dir, server.id);
   if (!staged.ok) throw fail(staged);
-  const committed = await api.lore(["commit", "Update categories"], dir, server.id);
+  const committed = await api.lore(["commit", message], dir, server.id);
   // Nothing to commit is not a problem.
   if (!committed.ok && !/nothing|no changes/i.test(committed.stderr + committed.stdout)) throw fail(committed);
   const pushed = await api.lore(["push"], dir, server.id);
   if (!pushed.ok) throw fail(pushed);
 }
 
+/** Writes the file and sends it to the server. Syncs first so other people's changes are not lost. */
+export function pushShared(server: Server, config: SharedConfig): Promise<void> {
+  return inOrder(async () => {
+    const dir = await folder(server);
+    await bringUpToDate(server, dir);
+    await saveAndSend(server, dir, config, "Update categories");
+  });
+}
+
 /** Creates the shared project from this PC's categories and lets every user read it. Admin only. */
-export async function createShared(server: Server, config: SharedConfig): Promise<void> {
-  const dir = await folder(server);
-  if (await api.exists(`${dir}\.lore`)) throw new Error(`${dir} already holds a working copy. Remove it first.`);
-  // `lore repository create` runs in an existing folder.
-  await api.writeText(`${dir}\${FILE}`, JSON.stringify(config, null, 2) + "\n");
-  const created = await api.lore(["repository", "create", `${server.loreUrl}/${SHARED_NAME}`], dir, server.id);
-  if (!created.ok) throw fail(created);
-  for (const step of [["stage", "."], ["commit", "Shared categories"], ["push"]]) {
-    const result = await api.lore(step, dir, server.id);
-    if (!result.ok) throw fail(result);
-  }
-  await shareWithEveryone(server);
+export function createShared(server: Server, config: SharedConfig): Promise<void> {
+  return inOrder(async () => {
+    const dir = await folder(server);
+    if (await api.exists(at(dir, ".lore"))) throw new Error(`${dir} already holds a working copy. Remove it first.`);
+    // `lore repository create` runs in an existing folder; writing the file creates it.
+    await api.writeText(at(dir, FILE), JSON.stringify(config, null, 2) + "\n");
+    const created = await api.lore(["repository", "create", `${server.loreUrl}/${SHARED_NAME}`], dir, server.id);
+    if (!created.ok) throw fail(created);
+    await saveAndSend(server, dir, config, "Shared categories");
+    await shareWithEveryone(server);
+  });
 }
 
 /** Gives every user (also new ones, when this is run again) read access to the shared project. */

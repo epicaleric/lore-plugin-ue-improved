@@ -187,7 +187,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (hasShared) {
             try {
               const shared = await pullShared(active);
-              if (shared) {
+              if (!shared && adminRef.current) {
+                // The project exists but nothing was saved in it yet.
+                await pushShared(active, { version: 1, categories: current.categories, assignments: current.assignments });
+              } else if (shared) {
                 const next = { ...settingsRef.current, categories: shared.categories, assignments: shared.assignments };
                 settingsRef.current = next;
                 setSettings(next);

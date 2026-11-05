@@ -154,7 +154,11 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
 
   const installApp = useCallback(async () => {
     if (!app.asset) return;
-    await withBusy("app", () => api.installAppUpdate(app.asset!));
+    await withBusy("app", async () => {
+      toast(`Updating Lore+ to ${app.latest}. The app closes for a moment and opens again by itself.`, "info");
+      await new Promise((resolve) => setTimeout(resolve, 3500));
+      await api.installAppUpdate(app.asset!);
+    });
   }, [app.asset]);
 
   const installPlugin = useCallback(
