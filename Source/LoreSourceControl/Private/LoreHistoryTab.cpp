@@ -785,7 +785,7 @@ namespace
 	FSlateColor ContrastFor(const FLinearColor& InBackground)
 	{
 		const float Luminance = 0.2126f * InBackground.R + 0.7152f * InBackground.G + 0.0722f * InBackground.B;
-		return Luminance > 0.25f ? FSlateColor(FLinearColor(0.01f, 0.01f, 0.012f, 1.0f)) : FSlateColor(FLinearColor::White);
+		return Luminance > 0.55f ? FSlateColor(FLinearColor(0.01f, 0.01f, 0.012f, 1.0f)) : FSlateColor(FLinearColor::White);
 	}
 
 	void ApplyAccent(const FString& InValue)
@@ -1721,9 +1721,15 @@ private:
 				CheckUpdates();
 			}
 		}
-		else if (InIndex == 4 && Server.RemoteUrl.IsEmpty())
+		else if (InIndex == 4)
 		{
-			LoadServerInfo(LoreSourceControlUtils::GetCommandContextFromModule(), Server);
+			if (Server.RemoteUrl.IsEmpty())
+			{
+				LoadServerInfo(LoreSourceControlUtils::GetCommandContextFromModule(), Server);
+			}
+			// Show what is saved on disk, so a stale box can never hide or overwrite the key.
+			if (ApiKeyBox.IsValid()) { ApiKeyBox->SetText(FText::FromString(LoadAiSetting(TEXT("GeminiApiKey"), FString()))); }
+			if (LanguageBox.IsValid()) { LanguageBox->SetText(FText::FromString(Language)); }
 		}
 		return FReply::Handled();
 	}
@@ -3073,6 +3079,7 @@ private:
 			{
 				FColorPickerArgs Args(ColorFromValue(InCurrent(), Accent), FOnLinearColorValueChanged::CreateLambda([InPick](FLinearColor InColor) { InPick(ColorToValue(InColor)); }));
 				Args.bOnlyRefreshOnMouseUp = true;
+					Args.bOnlyRefreshOnOk = true;
 				Args.bUseAlpha = false;
 				OpenColorPicker(Args);
 				return FReply::Handled();
@@ -3347,7 +3354,7 @@ namespace LoreHistoryTab
 	void Register()
 	{
 		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(LoreHistoryTabName, FOnSpawnTab::CreateStatic(&SpawnTab))
-			.SetDisplayName(LOCTEXT("TabTitle", "Lore History"))
+			.SetDisplayName(LOCTEXT("TabTitle", "Lore Revision Control"))
 			.SetTooltipText(LOCTEXT("TabTooltip", "Revision history, restore and locked files for the Lore repository."))
 			.SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsMiscCategory());
 	}
