@@ -142,8 +142,14 @@ export function useProjectActions() {
     if (!server || !project.id) return;
     const folder = await open({ directory: true, multiple: false, title: `Where should ${project.name} go?` });
     if (!folder || Array.isArray(folder)) return;
-    const target = `${folder.replace(/[\\/]$/, "")}\\${project.name}`;
+    const parent = folder.replace(/[\\/]$/, "");
+    const target = `${parent}\\${project.name}`;
     await run(project.key, "Cloning", async () => {
+      // The new copy has to be found afterwards, so the folder it went into is searched from now on.
+      const searched = [...(await api.defaultRoots()), ...settings.roots];
+      if (!searched.some((root) => parent.toLowerCase().startsWith(root.toLowerCase().replace(/[\\/]$/, "")))) {
+        update({ roots: [...settings.roots, parent] });
+      }
       const result = await api.lore(["clone", `${server.loreUrl}/${encodeURIComponent(project.name)}`, target], null, server.id);
       if (!result.ok) throw new Error((result.stderr || result.stdout).trim().split("\n").slice(0, 3).join(" "));
       toast(`${project.name} is on your PC now`, "good");

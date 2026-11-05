@@ -213,7 +213,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
 
       // Projects on this PC.
-      const roots = current.roots.length ? current.roots : await api.defaultRoots();
+      // The usual places for Unreal projects plus every folder the person added or cloned into.
+      const roots = [...new Set([...(await api.defaultRoots()), ...current.roots])];
       const paths = await api.scan(roots);
       const found = await Promise.all(
         paths.map(async (path): Promise<LocalProject> => {
