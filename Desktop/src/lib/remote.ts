@@ -50,7 +50,8 @@ export async function loadRemoteInfo(server: Server, repo: RemoteRepo, known: Re
 
   const state = await api.lore(["status"], dir, server.id);
   const revision = state.ok ? parseStatus(state.stdout).remoteRevision : 0;
-  if (known && known.revision === revision && (known.thumbnail === null || (await api.exists(known.thumbnail)))) return known;
+  // Without a thumbnail it is looked for again: reading it may have failed last time.
+  if (known && known.revision === revision && known.thumbnail && (await api.exists(known.thumbnail))) return known;
 
   // Every file of the project, as a bare clone lists them as not present.
   const scan = await api.lore(["status", "--scan"], dir, server.id);
@@ -90,8 +91,8 @@ export async function loadRemoteInfo(server: Server, repo: RemoteRepo, known: Re
     }
   }
 
-  // Also the plain thumbnail.png at the top of a project.
-  const plain = files.find((p) => /^thumbnail\.png$/i.test(p));
+  // Also the plain thumbnail.png at the top of a project, or in Resources for a backup of a UEFN project.
+  const plain = files.find((p) => /^(Resources\/)?thumbnail\.png$/i.test(p));
   if (!thumbnail && plain) {
     const target = at(side, `thumbnail-${revision}.png`);
     const got = await api.lore(["file", "write", "--path", plain, "--output", target], dir, server.id);

@@ -313,6 +313,10 @@ async fn download(app: &AppHandle, task: &str, url: &str, target: &Path) -> Resu
             log(app, task, format!("  {} of {} MB", done / 1_000_000, total / 1_000_000));
         }
     }
+    // Tokio finishes writes in the background: without this the file can still be open when it is started (os error 32).
+    file.flush().await.map_err(|e| e.to_string())?;
+    file.sync_all().await.map_err(|e| e.to_string())?;
+    drop(file);
     Ok(())
 }
 
@@ -362,7 +366,18 @@ pub async fn install_app_update(app: AppHandle, url: String) -> Result<(), Strin
     let target = download_target("loreplus-update-setup", "exe");
     download(&app, task, &url, &target).await?;
     log(&app, task, "Starting the installer, the app will restart.");
-    std::process::Command::new(&target).args(["/S", "/R"]).spawn().map_err(|e| e.to_string())?;
+    // A virus scanner can hold a new download for a moment, so a locked file is tried again.
+    let mut tries = 0;
+    loop {
+        match std::process::Command::new(&target).args(["/S", "/R"]).spawn() {
+            Ok(_) => break,
+            Err(error) if error.raw_os_error() == Some(32) && tries < 40 => {
+                tries += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
     tokio::time::sleep(std::time::Duration::from_millis(600)).await;
     app.exit(0);
     Ok(())
