@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { ChevronsUpDown, LayoutGrid, Plus, RefreshCw, Settings as SettingsIcon, ShieldCheck, Star, Users } from "lucide-react";
+import { ChevronsUpDown, LayoutGrid, Play, Plus, RefreshCw, Settings as SettingsIcon, ShieldCheck, Star, Users } from "lucide-react";
+import { api } from "../lib/api";
+import { useProjectActions } from "../lib/actions";
 import { useStore, type View } from "../lib/store";
 import { useUpdates } from "../lib/updates";
 import { readableOn } from "../lib/format";
@@ -13,6 +15,7 @@ import type { Category } from "../lib/types";
 export function Sidebar() {
   const { settings, update, server, session, view, go, category, setCategory, projects, isAdmin, setServer, categories, sharedActive, projectKey } = useStore();
   const [over, setOver] = useState<string | null>(null);
+  const { openProject } = useProjectActions();
   const canEdit = !sharedActive || isAdmin;
   const updates = useUpdates();
   const menu = useMenu();
@@ -124,9 +127,20 @@ export function Sidebar() {
           <>
             <div className="nav-group-title"><span>Favorites</span></div>
             {favorites.map((p) => (
-              <button key={p.key} className={`nav-item ${view === "project" && projectKey === p.key ? "active" : ""}`} onClick={() => go("project", p.key)}>
-                <span className="cat-row"><Star size={13} fill="currentColor" color="var(--warn)" />{settings.overrides[p.id!]?.displayName || p.name}</span>
-              </button>
+              <div key={p.key} className="nav-row">
+                <button className={`nav-item ${view === "project" && projectKey === p.key ? "active" : ""}`} onClick={() => go("project", p.key)}>
+                  <span className="cat-row"><Star size={13} fill="currentColor" color="var(--warn)" />{settings.overrides[p.id!]?.displayName || p.name}</span>
+                </button>
+                {p.local && (
+                  <button
+                    className="row-play"
+                    title={p.local.uproject ? "Open in Unreal Engine" : "Open the folder"}
+                    onClick={() => (p.local!.uproject ? openProject(p) : api.openPath(p.local!.path))}
+                  >
+                    <Play size={13} fill="currentColor" />
+                  </button>
+                )}
+              </div>
             ))}
           </>
         )}

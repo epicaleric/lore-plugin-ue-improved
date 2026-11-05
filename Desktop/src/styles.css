@@ -262,3 +262,9 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .progress > span { display: block; height: 100%; background: var(--grad); border-radius: 3px; transition: width 0.3s; }
 .progress.busy > span { width: 35% !important; animation: slide 1.3s ease-in-out infinite; }
 @keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+
+.size-float { position: fixed; right: 22px; bottom: 18px; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 20px; background: color-mix(in srgb, var(--raised) 92%, transparent); border: 1px solid var(--border); color: var(--muted); box-shadow: var(--shadow); backdrop-filter: blur(6px); z-index: 20; }
+.nav-row { position: relative; }
+.nav-row .row-play { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; border-radius: 8px; border: 0; background: var(--accent); color: var(--accent-ink); display: none; place-items: center; cursor: pointer; }
+.nav-row:hover .row-play { display: grid; }
+.nav-row:hover > .nav-item { padding-right: 40px; }

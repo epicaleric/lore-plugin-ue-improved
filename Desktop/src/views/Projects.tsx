@@ -263,7 +263,6 @@ export function Projects() {
         </div>
         <div className="spacer" />
         <label className="search"><Search size={16} /><input placeholder="Search projects" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
-        <input className="size-slider" type="range" min={min} max={max} value={size} onChange={(e) => setSize(Number(e.target.value))} title="Size (also Ctrl + scroll)" />
         <select className="select sort" value={settings.sort} onChange={(e) => update({ sort: e.target.value as SortKey })} title="Sort">
           <option value="name">Name</option>
           <option value="opened">Recently opened</option>
@@ -305,6 +304,11 @@ export function Projects() {
         ) : (
           <div className="list">{sorted.map((p) => <ListRow key={p.key} project={p} onOpen={() => go("project", p.key)} />)}</div>
         )}
+      </div>
+      <div className="size-float" title="Size (also Ctrl + scroll)">
+        <Grid2x2 size={13} />
+        <input className="size-slider" type="range" min={min} max={max} value={size} onChange={(e) => setSize(Number(e.target.value))} />
+        <Grid2x2 size={18} />
       </div>
       {signIn && server && <SignInModal server={server} onClose={() => setSignIn(false)} />}
       {adding && <AddProjectModal onClose={() => setAdding(false)} />}
