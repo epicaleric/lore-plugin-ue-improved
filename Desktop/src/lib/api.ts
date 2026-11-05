@@ -93,4 +93,9 @@ export const adminApi = {
   deleteUser: (s: Server, name: string) => api.admin(s, "DELETE", `/users/${encodeURIComponent(name)}`),
   grant: (s: Server, user: string, repository: string) => api.admin(s, "PUT", "/grants", { user, repository }),
   revoke: (s: Server, user: string, repository: string) => api.admin(s, "DELETE", "/grants", { user, repository }),
+  /** Takes one project from someone who has all of them: every other project is then given one by one. */
+  revokeFromAll: async (s: Server, user: string, repository: string) => {
+    for (const repo of await adminApi.repositories(s)) if (repo.id !== repository) await adminApi.grant(s, user, repo.id);
+    await adminApi.revoke(s, user, "*");
+  },
 };

@@ -3,6 +3,7 @@ import { api, adminApi } from "./api";
 import { parseHistory, parseInfo, parseRepoList } from "./parse";
 import { readableOn } from "./format";
 import { cachedRemoteInfo, loadRemoteInfo } from "./remote";
+import { BACKUP_SUFFIX, serverName } from "./uefn";
 import { SHARED_NAME, createShared, pullShared, pushShared, shareWithEveryone, visibleCategories } from "./shared";
 import type { Category, Engine, RemoteInfo, LocalProject, Project, RemoteRepo, Revision, Server, SessionInfo, Settings, UefnProject } from "./types";
 
@@ -325,7 +326,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const list: Project[] = [];
     const used = new Set<string>();
     // The server copy of a UEFN backup is shown with the UEFN project itself.
-    const backups = new Set(Object.values(settings.uefnBackups).map((b) => b.name));
+    const backups = new Set([...Object.values(settings.uefnBackups).map((b) => b.name), ...uefns.map((u) => `${serverName(u.name)}${BACKUP_SUFFIX}`)]);
     for (const repo of remote.filter((r) => !backups.has(r.name))) {
       const copies = byKey.get(repo.id) ?? [];
       used.add(repo.id);

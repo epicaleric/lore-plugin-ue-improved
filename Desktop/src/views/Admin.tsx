@@ -100,6 +100,9 @@ function Users({ users, grants, reload }: { users: AdminUser[]; grants: Grant[];
                       user.admin
                         ? { label: "Remove administrator rights", icon: <ShieldOff size={15} />, onClick: () => server && act(() => adminApi.updateUser(server, user.name, { admin: false }), "Rights updated") }
                         : { label: "Make administrator", icon: <ShieldCheck size={15} />, onClick: () => server && act(() => adminApi.updateUser(server, user.name, { admin: true }), "Rights updated") },
+                      ...(!user.admin && own.some((g) => g.repository === "*")
+                        ? [{ label: "Remove access to all projects", icon: <Lock size={15} />, onClick: () => server && act(async () => { await adminApi.revoke(server, user.name, "*"); await shareWithEveryone(server); }, "Access removed") }]
+                        : []),
                       user.disabled
                         ? { label: "Enable sign-in", icon: <Check size={15} />, onClick: () => server && act(() => adminApi.updateUser(server, user.name, { disabled: false }), "User enabled") }
                         : { label: "Disable sign-in", icon: <Ban size={15} />, onClick: () => server && act(() => adminApi.updateUser(server, user.name, { disabled: true }), "User disabled") },
@@ -130,28 +133,44 @@ function Matrix({ users, grants, repos, reload }: { users: AdminUser[]; grants: 
     const key = `${user.name}:${repo.id}`;
     setBusy(key);
     try {
-      if (has(user.name, repo.id)) await adminApi.revoke(server, user.name, repo.id);
+      if (has(user.name, "*")) await adminApi.revokeFromAll(server, user.name, repo.id);
+      else if (has(user.name, repo.id)) await adminApi.revoke(server, user.name, repo.id);
       else await adminApi.grant(server, user.name, repo.id);
       reload();
     } catch (e) { toast(String(e), "bad"); } finally { setBusy(null); }
   };
+
+  const toggleAll = async (user: AdminUser) => {
+    if (!server) return;
+    setBusy(`${user.name}:*`);
+    try {
+      if (has(user.name, "*")) {
+        await adminApi.revoke(server, user.name, "*");
+        // The categories stay readable for everybody.
+        await shareWithEveryone(server);
+      } else await adminApi.grant(server, user.name, "*");
+      reload();
+    } catch (e) { toast(String(e), "bad"); } finally { setBusy(null); }
+  };
+  const shown = repos.filter((r) => r.name !== SHARED_NAME);
 
   if (repos.length === 0) return <Empty icon={<Lock size={28} />} title="No projects on the server yet" />;
   return (
     <div className="panel" style={{ padding: 0, overflow: "auto" }}>
       <table className="table matrix">
         <thead>
-          <tr><th>User</th>{repos.map((r) => <th key={r.id} className="rot" title={r.name}>{r.name}</th>)}</tr>
+          <tr><th>User</th><th className="rot" title="Also every project that is added later">All projects</th>{shown.map((r) => <th key={r.id} className="rot" title={r.name}>{r.name}</th>)}</tr>
         </thead>
         <tbody>
           {users.map((user) => {
-            const all = user.admin || has(user.name, "*");
+            const box = (key: string, checked: boolean, onChange: () => void) => busy === key ? <Spinner size={14} /> : <input className="checkbox" type="checkbox" checked={checked} onChange={onChange} />;
             return (
               <tr key={user.name}>
                 <td><div className="row gap-s"><Avatar name={user.name} size="small" /><b>{user.displayName || user.name}</b>{user.admin && <Pill tone="accent">admin</Pill>}</div></td>
-                {repos.map((repo) => (
+                <td className="cell">{user.admin ? <Check size={16} color="var(--faint)" /> : box(`${user.name}:*`, has(user.name, "*"), () => toggleAll(user))}</td>
+                {shown.map((repo) => (
                   <td key={repo.id} className="cell">
-                    {all ? <Check size={16} color="var(--faint)" /> : busy === `${user.name}:${repo.id}` ? <Spinner size={14} /> : <input className="checkbox" type="checkbox" checked={has(user.name, repo.id)} onChange={() => toggle(user, repo)} />}
+                    {user.admin ? <Check size={16} color="var(--faint)" /> : box(`${user.name}:${repo.id}`, has(user.name, "*") || has(user.name, repo.id), () => toggle(user, repo))}
                   </td>
                 ))}
               </tr>

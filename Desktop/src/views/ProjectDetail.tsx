@@ -86,13 +86,14 @@ function Access({ repoId, repoName }: { repoId: string; repoName: string }) {
   if (!loaded) return <div className="muted row"><Spinner /> Loading</div>;
 
   const hasGrant = (user: AdminUser) => grants.some((g) => g.user === user.name && (g.repository === repoId || g.repository === "*"));
-  const viaAll = (user: AdminUser) => user.admin || grants.some((g) => g.user === user.name && g.repository === "*");
+  const viaAll = (user: AdminUser) => user.admin;
 
   const toggle = async (user: AdminUser) => {
     if (!server) return;
     setBusy(user.name);
     try {
-      if (grants.some((g) => g.user === user.name && g.repository === repoId)) await adminApi.revoke(server, user.name, repoId);
+      if (grants.some((g) => g.user === user.name && g.repository === "*")) await adminApi.revokeFromAll(server, user.name, repoId);
+      else if (grants.some((g) => g.user === user.name && g.repository === repoId)) await adminApi.revoke(server, user.name, repoId);
       else await adminApi.grant(server, user.name, repoId);
       await load();
     } catch (e) {
