@@ -1,5 +1,7 @@
 # Lore Source Control for Unreal Engine
 
+> Based on [ScottRaffertyCG/lore-ue](https://github.com/ScottRaffertyCG/lore-ue) (MIT, originally by Pyre Labs). This repository adds the Lore History window, check-in tab, Gemini descriptions and lock fixes described below.
+
 **Native [Lore](https://github.com/EpicGames/lore) revision control inside the Unreal Editor.**
 
 This plugin adds Lore as a source control provider in Unreal Engine, alongside the
