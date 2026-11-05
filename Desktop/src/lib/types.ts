@@ -1,0 +1,111 @@
+export interface Server {
+  id: string;
+  label: string;
+  loreUrl: string;
+  authUrl: string;
+  webUrl: string;
+}
+
+export interface SessionInfo {
+  userName: string;
+  userId: string;
+  expiresAt: number;
+}
+
+export interface CliResult {
+  ok: boolean;
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  color: string;
+  parentId?: string;
+}
+
+export interface ProjectOverride {
+  displayName?: string;
+  engine?: string;
+  thumbnail?: string;
+}
+
+export interface Settings {
+  servers: Server[];
+  activeServer?: string;
+  roots: string[];
+  categories: Category[];
+  /** repository id -> category id */
+  assignments: Record<string, string>;
+  overrides: Record<string, ProjectOverride>;
+  favorites: string[];
+  accent: string;
+  view: "grid" | "list";
+  autoUpdate: { lore: boolean; plugin: boolean; app: boolean };
+}
+
+export interface RemoteRepo {
+  id: string;
+  name: string;
+}
+
+export interface LocalProject {
+  path: string;
+  name: string;
+  uproject: string | null;
+  engine: string | null;
+  description: string | null;
+  thumbnail: string | null;
+  plugin: string | null;
+  repoId?: string;
+  repoName?: string;
+  remoteUrl?: string;
+  branch?: string;
+}
+
+export interface Project {
+  /** repository id (or the local path when the project is not on the server) */
+  key: string;
+  id?: string;
+  name: string;
+  onServer: boolean;
+  local?: LocalProject;
+}
+
+export interface RepoStatus {
+  branch: string;
+  localRevision: number;
+  remoteRevision: number;
+  changes: number;
+  inSync: boolean;
+}
+
+export interface Revision {
+  number: number;
+  signature: string;
+  date: string;
+  author: string;
+  description: string;
+}
+
+export interface Engine {
+  version: string;
+  path: string;
+  editor: string;
+  plugin: string | null;
+}
+
+export interface AdminUser {
+  name: string;
+  displayName: string;
+  admin: boolean;
+  disabled: boolean;
+}
+
+export interface Grant {
+  user: string;
+  repository: string;
+  repositoryName: string | null;
+}

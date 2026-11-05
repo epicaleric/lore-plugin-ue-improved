@@ -31,3 +31,9 @@ __pycache__/
 *.sln
 *.suo
 *.user
+
+# Lore Hub
+Desktop/node_modules/
+Desktop/dist/
+Desktop/src-tauri/target/
+Desktop/src-tauri/gen/

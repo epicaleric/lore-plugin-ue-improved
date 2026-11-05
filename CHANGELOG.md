@@ -1,6 +1,15 @@
 # Changelog
 
-All notable changes to this plugin. Versions follow `VersionName` in `LoreSourceControl.uplugin`.
+All notable changes. The plugin and the app are versioned separately: the plugin by `VersionName` in `LoreSourceControl.uplugin`, the app by the `desktop-v` tags.
+
+## Lore Hub 0.1.0
+
+First version of the desktop app: servers and sign-in, project cards with thumbnails and Unreal versions, sync and clone, upload of a local project, history, categories, user and access administration, and automatic updates of the Lore client, the plugin and the app.
+
+## Plugin 0.3.1
+
+- The repository was reorganised: the plugin now lives in `Plugin/LoreSourceControl`. The update check follows the new location.
+
 
 ## 0.3.0
 

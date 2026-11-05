@@ -2975,7 +2975,7 @@ private:
 		PluginRelease.Url = PluginRepositoryUrl;
 		StartReleaseCheck(TEXT("https://api.github.com/repos/EpicGames/lore/releases/latest"), true);
 		// This plugin's own version is read from the .uplugin file on the main branch of its repository.
-		StartReleaseCheck(TEXT("https://raw.githubusercontent.com/epicaleric/lore-plugin-ue-improved/main/LoreSourceControl.uplugin"), false);
+		StartReleaseCheck(TEXT("https://raw.githubusercontent.com/epicaleric/lore-plugin-ue-improved/main/Plugin/LoreSourceControl/LoreSourceControl.uplugin"), false);
 	}
 
 	void StartReleaseCheck(const FString& InUrl, bool bInLoreClient)
