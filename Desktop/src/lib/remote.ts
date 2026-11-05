@@ -73,13 +73,15 @@ export async function loadRemoteInfo(server: Server, repo: RemoteRepo, known: Re
   // Unreal version from the .uproject, thumbnail from the picture next to it.
   const side = at(base, `${repo.id}.files`);
   await api.writeText(at(side, ".keep"), "");
+  // Lore refuses to write over a file, so what is already there for this revision is used as it is.
+  const fetchFile = async (path: string, target: string) => (await api.exists(target)) || (await api.lore(["file", "write", "--path", path, "--output", target], dir, server.id)).ok;
   const uproject = files.find((p) => !p.includes("/") && p.toLowerCase().endsWith(".uproject"));
   let engine: string | null = null;
   let thumbnail: string | null = null;
   if (uproject) {
-    const out = at(side, "project.uproject");
-    const wrote = await api.lore(["file", "write", "--path", uproject, "--output", out], dir, server.id);
-    if (wrote.ok) {
+    const out = at(side, `project-${revision}.uproject`);
+    const wrote = await fetchFile(uproject, out);
+    if (wrote) {
       try {
         engine = JSON.parse(clean((await api.readText(out)) ?? "{}")).EngineAssociation || null;
       } catch {
@@ -89,8 +91,8 @@ export async function loadRemoteInfo(server: Server, repo: RemoteRepo, known: Re
     const png = `${uproject.replace(/\.uproject$/i, "")}.png`;
     if (files.includes(png)) {
       const target = at(side, `thumbnail-${revision}.png`);
-      const got = await api.lore(["file", "write", "--path", png, "--output", target], dir, server.id);
-      if (got.ok) thumbnail = target;
+      const got = await fetchFile(png, target);
+      if (got) thumbnail = target;
     }
   }
 
@@ -98,8 +100,8 @@ export async function loadRemoteInfo(server: Server, repo: RemoteRepo, known: Re
   const plain = files.find((p) => /^(Resources\/)?thumbnail\.png$/i.test(p));
   if (!thumbnail && plain) {
     const target = at(side, `thumbnail-${revision}.png`);
-    const got = await api.lore(["file", "write", "--path", plain, "--output", target], dir, server.id);
-    if (got.ok) thumbnail = target;
+    const got = await fetchFile(plain, target);
+    if (got) thumbnail = target;
   }
 
   const history = await api.lore(["history", "200"], dir, server.id);
