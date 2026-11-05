@@ -187,6 +187,7 @@ pub fn read_project(path: String) -> Value {
         "engine": engine,
         "description": description,
         "thumbnail": thumbnail,
+        "repoId": repo_id_of(&dir),
         "plugin": plugin_version_of(&dir.join(r"Plugins\LoreSourceControl\LoreSourceControl.uplugin")),
     })
 }
@@ -623,4 +624,28 @@ pub async fn folder_listing(path: String) -> Result<Value, String> {
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+fn repo_id_of(dir: &Path) -> Option<String> {
+    let bytes = std::fs::read(dir.join(".lore").join("id")).ok()?;
+    if bytes.len() != 16 {
+        return None;
+    }
+    Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The id of the repository a working copy belongs to, read from the copy itself (no Lore command, no sign-in needed).
+#[tauri::command]
+pub fn repo_id(path: String) -> Option<String> {
+    repo_id_of(Path::new(&path))
+}
+
+/// Writes a file from base64 data, creating the folder when needed.
+#[tauri::command]
+pub fn write_binary_file(path: String, data: String) -> Result<(), String> {
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| e.to_string())?;
+    if let Some(parent) = Path::new(&path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())
 }

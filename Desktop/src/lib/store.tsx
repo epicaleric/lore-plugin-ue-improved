@@ -218,9 +218,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const paths = await api.scan(roots);
       const found = await Promise.all(
         paths.map(async (path): Promise<LocalProject> => {
-          const [project, info] = await Promise.all([api.readProject(path), api.lore(["repository", "info"], path)]);
+          const [project, info] = await Promise.all([api.readProject(path), api.lore(["repository", "info"], path, active?.id)]);
           const parsed = info.ok ? parseInfo(info.stdout) : {};
-          return { ...project, repoId: parsed.id, repoName: parsed.name, remoteUrl: parsed.remoteUrl, branch: parsed.branch };
+          return { ...project, repoId: parsed.id ?? project.repoId ?? undefined, repoName: parsed.name, remoteUrl: parsed.remoteUrl, branch: parsed.branch };
         }),
       );
       setLocals(found);

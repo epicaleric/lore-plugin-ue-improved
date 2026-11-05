@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, Download, EyeOff, FolderInput, FolderOpen, Lock, Play, RefreshCw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
-import { Avatar, Empty, Field, Pill, Spinner, Thumb } from "../components/ui";
+import { Avatar, Empty, Field, Pill, Spinner, Thumb, forgetImages } from "../components/ui";
 import { api, adminApi } from "../lib/api";
 import { formatBytes, fullDate, timeAgo } from "../lib/format";
-import { layoutDescription, parseHistory, parseInfo } from "../lib/parse";
+import { layoutDescription, parseHistory } from "../lib/parse";
 import { invalidateStatus, useProjectActions } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { pluginIsOutdated, useUpdates } from "../lib/updates";
@@ -125,7 +125,7 @@ function Access({ repoId, repoName }: { repoId: string; repoName: string }) {
 }
 
 function ProjectSettings({ projectKey }: { projectKey: string }) {
-  const { projects, settings, update, engines, toast, categories } = useStore();
+  const { projects, settings, update, engines, toast, categories, reload } = useStore();
   const project = projects.find((p) => p.key === projectKey)!;
   const id = project.id;
   const override = (id && settings.overrides[id]) || {};
@@ -167,13 +167,40 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
           {categories.map((c) => <option key={c.id} value={c.id}>{c.parentId ? "   " : ""}{c.name}</option>)}
         </select>
       </Field>
-      <Field label="Thumbnail">
+      <Field label="Thumbnail" hint="Saved in the Unreal project itself (a .png next to the .uproject). It goes to the server with the next version you save, so everybody sees it.">
         <div className="row gap-s">
-          <button className="btn" onClick={async () => {
+          <button className="btn" disabled={!project.local?.uproject} onClick={async () => {
             const file = await open({ multiple: false, filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg"] }] });
-            if (file && !Array.isArray(file)) set({ thumbnail: file });
+            if (!file || Array.isArray(file) || !project.local?.uproject) return;
+            try {
+              // Unreal's own project thumbnail: a square png next to the .uproject, named like it.
+              const picture = await api.readImage(file);
+              if (!picture) throw new Error("That image could not be read.");
+              const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error("That image could not be opened."));
+                img.src = picture;
+              });
+              const side = 256;
+              const canvas = document.createElement("canvas");
+              canvas.width = side;
+              canvas.height = side;
+              const crop = Math.min(image.width, image.height);
+              canvas.getContext("2d")!.drawImage(image, (image.width - crop) / 2, (image.height - crop) / 2, crop, crop, 0, 0, side, side);
+              const uproject = project.local.uproject.replace(/\\/g, "/");
+              const target = uproject.replace(/\.uproject$/i, ".png");
+              await api.writeBinary(target, canvas.toDataURL("image/png").split(",")[1]);
+              set({ thumbnail: undefined });
+              forgetImages();
+              await reload();
+              toast(`Saved as ${target.split("/").pop()} in the project. Save a new version to share it with everyone.`, "good");
+            } catch (error) {
+              toast(String(error), "bad");
+            }
           }}>Choose image</button>
           {override.thumbnail && <button className="btn ghost" onClick={() => { set({ thumbnail: undefined }); toast("Thumbnail reset"); }}>Use the project's own</button>}
+          {!project.local?.uproject && <span className="faint">Needs a copy of the project on this PC.</span>}
         </div>
       </Field>
     </div>
@@ -190,9 +217,8 @@ function useCopyTools(project: Project) {
   const find = async () => {
     const chosen = await open({ directory: true, multiple: false, title: `Where is the copy of ${project.name}?` });
     if (!chosen || Array.isArray(chosen)) return;
-    const info = await api.lore(["repository", "info"], chosen);
-    const id = info.ok ? parseInfo(info.stdout).id : undefined;
-    if (!id) return toast("That folder is not a Lore working copy.", "bad");
+    const id = await api.repoId(chosen);
+    if (!id) return toast("That folder is not a Lore working copy. Pick the project folder itself (the one that has a .lore folder in it).", "bad");
     if (project.id && id !== project.id) return toast("That folder is a copy of another project.", "bad");
     if (!covered(chosen)) update({ roots: [...settings.roots, parentOf(chosen)] });
     toast("Found it", "good");

@@ -275,6 +275,8 @@ pub fn run() {
             system::set_aside_lore,
             system::set_aside_folder,
             system::relink_lore,
+            system::repo_id,
+            system::write_binary_file,
             system::folder_stats,
             system::folder_listing,
         ])

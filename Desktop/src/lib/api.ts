@@ -35,6 +35,8 @@ export const api = {
   removeCache: (path: string) => invoke<void>("remove_cache", { path }),
   moveFolder: (from: string, toParent: string) => invoke<string>("move_folder", { from, toParent }),
   setAsideFolder: (path: string) => invoke<string>("set_aside_folder", { path }),
+  repoId: (path: string) => invoke<string | null>("repo_id", { path }),
+  writeBinary: (path: string, data: string) => invoke<void>("write_binary_file", { path, data }),
   relinkLore: (folder: string, fresh: string) => invoke<string>("relink_lore", { folder, fresh }),
   setAsideLore: (path: string) => invoke<string>("set_aside_lore", { path }),
   folderListing: (path: string) => invoke<FolderListing>("folder_listing", { path }),
@@ -46,7 +48,7 @@ export const api = {
   defaultRoots: () => invoke<string[]>("default_roots"),
   scan: (roots: string[]) => invoke<string[]>("scan_lore_projects", { roots }),
   readProject: (path: string) =>
-    invoke<{ path: string; name: string; uproject: string | null; engine: string | null; description: string | null; thumbnail: string | null; plugin: string | null }>("read_project", { path }),
+    invoke<{ path: string; name: string; uproject: string | null; engine: string | null; description: string | null; thumbnail: string | null; plugin: string | null; repoId: string | null }>("read_project", { path }),
   readImage: (path: string) => invoke<string | null>("read_image", { path }),
   openProject: (uproject: string, editor?: string | null) => invoke<void>("open_project", { uproject, editor: editor ?? null }),
   openPath: (path: string) => invoke<void>("open_path", { path }),

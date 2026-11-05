@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Check, FolderOpen, FolderSearch, UploadCloud, X } from "lucide-react";
 import { api } from "../lib/api";
-import { parseInfo, parseStatus } from "../lib/parse";
+import { parseStatus } from "../lib/parse";
 import { invalidateStatus } from "../lib/actions";
 import { endJob, startJob } from "../lib/jobs";
 import { useStore } from "../lib/store";
@@ -130,8 +130,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
       let result: { ok: boolean; stderr: string; stdout: string } = { ok: true, stderr: "", stdout: "" };
       let linked = false;
       if (await invoke<boolean>("path_exists", { path: `${folder}\\.lore` })) {
-        const info = await api.lore(["repository", "info"], folder);
-        const id = info.ok ? parseInfo(info.stdout).id : undefined;
+        const id = await api.repoId(folder);
         linked = !!id && remote.some((r) => r.id === id);
         if (!linked) {
           const aside = await api.setAsideLore(folder);
@@ -144,8 +143,8 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
         const state = await api.lore(["status"], folder, server.id);
         const parsed = state.ok ? parseStatus(state.stdout) : null;
         if (parsed && parsed.localRevision === 0 && parsed.remoteRevision === 0) {
-          const again = await api.lore(["repository", "info"], folder);
-          const linkedName = remote.find((r) => r.id === parseInfo(again.stdout).id)?.name ?? serverName(name);
+          const folderId = await api.repoId(folder);
+          const linkedName = remote.find((r) => r.id === folderId)?.name ?? serverName(name);
           const fresh = await api.metaDir(`fresh-${Date.now()}`);
           const cloned = await api.lore(["clone", `${server.loreUrl}/${linkedName}`, fresh], null, server.id);
           if (cloned.ok) {

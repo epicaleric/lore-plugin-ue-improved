@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { avatarColor, initials, placeholderGradient } from "../lib/format";
 import { api } from "../lib/api";
@@ -115,8 +115,18 @@ export function useMenu() {
 }
 
 const imageCache = new Map<string, string | null>();
+let imageVersion = 0;
+const imageListeners = new Set<() => void>();
+
+/** Forgets what was read from disk, for when a picture was replaced under the same name. */
+export function forgetImages() {
+  imageCache.clear();
+  imageVersion++;
+  imageListeners.forEach((listener) => listener());
+}
 
 export function useImage(path: string | null | undefined) {
+  const version = useSyncExternalStore((cb) => { imageListeners.add(cb); return () => { imageListeners.delete(cb); }; }, () => imageVersion);
   const [src, setSrc] = useState<string | null>(path ? imageCache.get(path) ?? null : null);
   useEffect(() => {
     if (!path) {
@@ -135,7 +145,7 @@ export function useImage(path: string | null | undefined) {
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, version]);
   return src;
 }
 
