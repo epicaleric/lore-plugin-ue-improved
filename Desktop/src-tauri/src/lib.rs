@@ -245,6 +245,7 @@ pub fn run() {
             system::set_aside_folder,
             system::relink_lore,
             system::folder_stats,
+            system::folder_listing,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lore+");

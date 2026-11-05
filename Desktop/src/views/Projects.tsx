@@ -142,7 +142,6 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
               {working ? <Spinner size={14} /> : <Download size={14} />} {working ?? "Clone to this PC"}
             </button>
           ) : null}
-          <button className="btn small ghost" onClick={() => go("project", project.key)}>Details</button>
         </div>
       </div>
       {menu.element}

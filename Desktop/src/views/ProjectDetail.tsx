@@ -3,12 +3,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, Download, EyeOff, FolderInput, FolderOpen, Lock, Play, RefreshCw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Avatar, Empty, Field, Pill, Spinner, Thumb } from "../components/ui";
 import { api, adminApi } from "../lib/api";
-import { fullDate, timeAgo } from "../lib/format";
+import { formatBytes, fullDate, timeAgo } from "../lib/format";
 import { layoutDescription, parseHistory, parseInfo } from "../lib/parse";
 import { invalidateStatus, useProjectActions } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { pluginIsOutdated, useUpdates } from "../lib/updates";
-import type { AdminUser, Grant, LocalProject, Project, Revision } from "../lib/types";
+import type { AdminUser, FolderListing, Grant, LocalProject, Project, Revision } from "../lib/types";
 import { ConfirmModal, useDeletes } from "../components/Danger";
 import { StatusPill, useProjectView } from "./Projects";
 
@@ -216,6 +216,42 @@ function useCopyTools(project: Project) {
   return { find, move };
 }
 
+/** What is in the project folder on this PC and how big it is. */
+function Files({ project, inSync, changes }: { project: Project; inSync: boolean | undefined; changes: number | undefined }) {
+  const path = project.local!.path;
+  const [listing, setListing] = useState<FolderListing | null>(null);
+  useEffect(() => {
+    setListing(null);
+    api.folderListing(path).then(setListing).catch(() => setListing({ entries: [], files: 0, bytes: 0 }));
+  }, [path]);
+  const largest = Math.max(1, ...(listing?.entries ?? []).map((e) => e.bytes));
+  return (
+    <div className="panel">
+      <div className="row between">
+        <h3>Files in the project</h3>
+        {listing && <span className="muted">{listing.files.toLocaleString()} files · {formatBytes(listing.bytes)}</span>}
+      </div>
+      <div className="desc">
+        What is in the folder on this PC. Saved, Intermediate, Binaries, DerivedDataCache and similar folders are not part of the project.
+        {changes === 0 && inSync ? " Everything in it is saved on the server." : ""}
+        {changes ? ` ${changes} file${changes === 1 ? " has" : "s have"} changes that are not saved yet.` : ""}
+      </div>
+      {!listing ? <Spinner /> : (
+        <table className="table"><tbody>
+          {listing.entries.map((entry) => (
+            <tr key={entry.name} style={entry.skipped ? { opacity: 0.5 } : undefined}>
+              <td style={{ width: 230 }}><span className="mono">{entry.name}{entry.dir ? "/" : ""}</span></td>
+              <td>{entry.skipped ? <span className="faint">not part of the project</span> : <div className="progress" style={{ marginTop: 0 }}><span style={{ width: `${Math.max(2, (entry.bytes / largest) * 100)}%` }} /></div>}</td>
+              <td className="muted" style={{ width: 90, textAlign: "right" }}>{entry.skipped ? "" : formatBytes(entry.bytes)}</td>
+              <td className="muted" style={{ width: 90, textAlign: "right" }}>{entry.skipped ? "" : `${entry.files.toLocaleString()} file${entry.files === 1 ? "" : "s"}`}</td>
+            </tr>
+          ))}
+        </tbody></table>
+      )}
+    </div>
+  );
+}
+
 function Copies({ project }: { project: Project }) {
   const { move } = useCopyTools(project);
   const { deleteLocal, hide } = useDeletes();
@@ -367,6 +403,7 @@ export function ProjectDetail() {
                 </tbody></table>
               </div>
             )}
+            {project.local && <Files project={project} inSync={view.status?.inSync} changes={view.status?.changes} />}
             <Copies project={project} />
             {!project.onServer && <div className="banner">This project is only on this PC. Use <b>Add project</b> on the Projects page to put it on {server?.label ?? "the server"}.</div>}
           </div>

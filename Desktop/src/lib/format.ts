@@ -62,3 +62,10 @@ export function readableOn(hex: string): string {
   const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
   return luminance > 0.33 ? "#0b0d12" : "#ffffff";
 }
+
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(bytes >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}

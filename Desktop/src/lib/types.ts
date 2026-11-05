@@ -130,3 +130,17 @@ export interface Grant {
   repository: string;
   repositoryName: string | null;
 }
+
+export interface FolderEntry {
+  name: string;
+  dir: boolean;
+  files: number;
+  bytes: number;
+  skipped: boolean;
+}
+
+export interface FolderListing {
+  entries: FolderEntry[];
+  files: number;
+  bytes: number;
+}

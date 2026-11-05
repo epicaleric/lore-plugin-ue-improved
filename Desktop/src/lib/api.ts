@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AdminUser, CliResult, Engine, Grant, Server, SessionInfo, Settings } from "./types";
+import type { AdminUser, CliResult, Engine, FolderListing, Grant, Server, SessionInfo, Settings } from "./types";
 
 export const api = {
   getSettings: () => invoke<Partial<Settings>>("get_settings"),
@@ -30,6 +30,7 @@ export const api = {
   setAsideFolder: (path: string) => invoke<string>("set_aside_folder", { path }),
   relinkLore: (folder: string, fresh: string) => invoke<string>("relink_lore", { folder, fresh }),
   setAsideLore: (path: string) => invoke<string>("set_aside_lore", { path }),
+  folderListing: (path: string) => invoke<FolderListing>("folder_listing", { path }),
   folderStats: (path: string) => invoke<{ files: number; bytes: number }>("folder_stats", { path }),
 
   health: (server: Server) => invoke<{ lore: { ok: boolean; ms: number }; auth: { ok: boolean; ms: number } }>("server_health", { server }),

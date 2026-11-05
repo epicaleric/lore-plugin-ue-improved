@@ -548,3 +548,56 @@ pub fn relink_lore(folder: String, fresh: String) -> Result<String, String> {
     let _ = std::fs::remove_dir_all(&fresh);
     Ok(aside)
 }
+
+const NOT_PART_OF_PROJECT: &[&str] = &["Saved", "Intermediate", "DerivedDataCache", "Binaries", "Builds", ".lore", ".git", ".vs", ".idea", ".vscode"];
+
+fn size_of(dir: &Path, files: &mut u64, bytes: &mut u64) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if path.is_dir() {
+            if NOT_PART_OF_PROJECT.contains(&name.as_str()) || name.starts_with(".lore.old") {
+                continue;
+            }
+            size_of(&path, files, bytes);
+        } else if let Ok(meta) = entry.metadata() {
+            *files += 1;
+            *bytes += meta.len();
+        }
+    }
+}
+
+/// The top level of a project folder with the size of each part, and the total of what goes into the project.
+#[tauri::command]
+pub async fn folder_listing(path: String) -> Result<Value, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = Path::new(&path);
+        let mut entries = Vec::new();
+        let (mut total_files, mut total_bytes) = (0u64, 0u64);
+        if let Ok(read) = std::fs::read_dir(root) {
+            for entry in read.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let is_dir = entry.path().is_dir();
+                if is_dir && (NOT_PART_OF_PROJECT.contains(&name.as_str()) || name.starts_with(".lore.old")) {
+                    entries.push(json!({ "name": name, "dir": true, "files": 0, "bytes": 0, "skipped": true }));
+                    continue;
+                }
+                let (mut files, mut bytes) = (0u64, 0u64);
+                if is_dir {
+                    size_of(&entry.path(), &mut files, &mut bytes);
+                } else if let Ok(meta) = entry.metadata() {
+                    files = 1;
+                    bytes = meta.len();
+                }
+                total_files += files;
+                total_bytes += bytes;
+                entries.push(json!({ "name": name, "dir": is_dir, "files": files, "bytes": bytes, "skipped": false }));
+            }
+        }
+        entries.sort_by(|a, b| b["bytes"].as_u64().cmp(&a["bytes"].as_u64()));
+        json!({ "entries": entries, "files": total_files, "bytes": total_bytes })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
