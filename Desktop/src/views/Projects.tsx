@@ -24,6 +24,8 @@ export function useProjectView(project: Project) {
 }
 
 export function StatusPill({ project, status }: { project: Project; status: ReturnType<typeof useStatus> }) {
+  const { session } = useStore();
+  if (!project.onServer && !session) return <Pill tone="muted">On this PC</Pill>;
   if (!project.onServer) return <Pill tone="warn"><UploadCloud size={12} /> Not on server</Pill>;
   if (!project.local) return <Pill tone="muted"><CloudOff size={12} /> Not on this PC</Pill>;
   if (status === undefined) return <Pill tone="muted"><Spinner size={11} /> Checking</Pill>;

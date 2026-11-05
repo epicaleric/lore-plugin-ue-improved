@@ -1,4 +1,4 @@
-﻿import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, adminApi } from "./api";
 import { parseInfo, parseRepoList } from "./parse";
 import { readableOn } from "./format";
@@ -19,6 +19,7 @@ export const defaultSettings: Settings = {
   assignments: {},
   overrides: {},
   favorites: [],
+  hidden: [],
   accent: "#14a0a5",
   view: "grid",
   autoUpdate: { lore: false, plugin: false, app: false },
@@ -170,20 +171,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [ready, server?.id]);
 
   const projects = useMemo<Project[]>(() => {
+    // One project can have several working copies on this PC; the first one is shown, the others are listed in its details.
+    const visible = locals.filter((l) => !settings.hidden.includes(l.path));
+    const byKey = new Map<string, LocalProject[]>();
+    for (const local of visible) {
+      const key = local.repoId ?? local.path;
+      byKey.set(key, [...(byKey.get(key) ?? []), local]);
+    }
     const list: Project[] = [];
     const used = new Set<string>();
     for (const repo of remote) {
-      const local = locals.find((l) => l.repoId === repo.id);
-      if (local) used.add(local.path);
-      list.push({ key: repo.id, id: repo.id, name: repo.name, onServer: true, local });
+      const copies = byKey.get(repo.id) ?? [];
+      used.add(repo.id);
+      list.push({ key: repo.id, id: repo.id, name: repo.name, onServer: true, local: copies[0], copies: copies.slice(1) });
     }
-    for (const local of locals) {
-      if (!used.has(local.path)) {
-        list.push({ key: local.repoId ?? local.path, id: local.repoId, name: local.repoName ?? local.name, onServer: false, local });
+    for (const [key, copies] of byKey) {
+      if (!used.has(key)) {
+        list.push({ key, id: copies[0].repoId, name: copies[0].repoName ?? copies[0].name, onServer: false, local: copies[0], copies: copies.slice(1) });
       }
     }
     return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [remote, locals]);
+  }, [remote, locals, settings.hidden]);
 
   const go = useCallback((next: View, key?: string | null) => {
     setView(next);

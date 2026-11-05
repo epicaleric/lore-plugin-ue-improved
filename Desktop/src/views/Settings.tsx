@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Edit3, FolderPlus, LogIn, LogOut, Plus, Trash2, X } from "lucide-react";
 import { ServerModal, SignInModal } from "../components/Servers";
@@ -70,6 +70,20 @@ export function Settings() {
           </div>
         </div>
 
+        {settings.hidden.length > 0 && (
+          <div className="panel">
+            <h3>Hidden copies</h3>
+            <div className="desc">Working copies you chose not to see in the project list.</div>
+            <div className="col">
+              {settings.hidden.map((path) => (
+                <div key={path} className="row between" style={{ background: "var(--bg)", border: "1px solid var(--border-soft)", borderRadius: 10, padding: "9px 14px" }}>
+                  <span className="mono">{path}</span>
+                  <button className="btn small" onClick={() => update({ hidden: settings.hidden.filter((h) => h !== path) })}>Show again</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="panel">
           <h3>Appearance</h3>
           <div className="desc">The accent colour is used for buttons, highlights and the timeline.</div>

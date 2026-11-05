@@ -102,7 +102,7 @@ export function useProjectActions() {
     if (!folder || Array.isArray(folder)) return;
     const target = `${folder.replace(/[\\/]$/, "")}\\${project.name}`;
     await run(project.key, "Cloning", async () => {
-      const result = await api.lore(["clone", `${server.loreUrl}/${project.name}`, target], null, server.id);
+      const result = await api.lore(["clone", `${server.loreUrl}/${encodeURIComponent(project.name)}`, target], null, server.id);
       if (!result.ok) throw new Error((result.stderr || result.stdout).trim().split("\n").slice(0, 3).join(" "));
       toast(`${project.name} is on your PC now`, "good");
       invalidateStatus();

@@ -225,6 +225,19 @@ pub fn write_text_file(path: String, contents: String, overwrite: bool) -> Resul
     Ok(true)
 }
 
+
+/// Removes a working copy. Only folders that hold a Lore working copy are accepted.
+#[tauri::command]
+pub fn delete_folder(path: String) -> Result<(), String> {
+    let dir = Path::new(&path);
+    if !dir.join(".lore").exists() {
+        return Err("This folder is not a Lore working copy, so it was not touched.".into());
+    }
+    if dir.components().count() < 3 {
+        return Err("That folder is too close to the top of the disk.".into());
+    }
+    std::fs::remove_dir_all(dir).map_err(|e| format!("Could not remove the folder: {e}"))
+}
 #[tauri::command]
 pub fn path_exists(path: String) -> bool {
     Path::new(&path).exists()

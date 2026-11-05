@@ -210,6 +210,7 @@ pub fn run() {
             system::default_roots,
             system::write_text_file,
             system::path_exists,
+            system::delete_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lore Hub");

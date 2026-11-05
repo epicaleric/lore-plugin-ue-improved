@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowLeft, Download, FolderOpen, Lock, Play, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import { ArrowLeft, Download, EyeOff, FolderOpen, Lock, Play, RefreshCw, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Avatar, Empty, Field, Pill, Spinner, Thumb } from "../components/ui";
 import { api, adminApi } from "../lib/api";
 import { fullDate, timeAgo } from "../lib/format";
@@ -8,7 +8,8 @@ import { layoutDescription, parseHistory } from "../lib/parse";
 import { useProjectActions } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { pluginIsOutdated, useUpdates } from "../lib/updates";
-import type { AdminUser, Grant, Revision } from "../lib/types";
+import type { AdminUser, Grant, LocalProject, Project, Revision } from "../lib/types";
+import { ConfirmModal, useDeletes } from "../components/Danger";
 import { StatusPill, useProjectView } from "./Projects";
 
 type Tab = "overview" | "history" | "access" | "settings";
@@ -179,13 +180,77 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
   );
 }
 
+function Copies({ project }: { project: Project }) {
+  const { deleteLocal, hide } = useDeletes();
+  const [ask, setAsk] = useState<LocalProject | null>(null);
+  const all = project.local ? [project.local, ...project.copies] : [];
+  if (all.length < 2) return null;
+  return (
+    <div className="panel">
+      <h3>Copies on this PC</h3>
+      <div className="desc">{project.name} is on this PC {all.length} times. They are separate working copies of the same project; the app shows the first one.</div>
+      <table className="table"><tbody>
+        {all.map((copy) => (
+          <tr key={copy.path}>
+            <td className="mono">{copy.path}</td>
+            <td style={{ width: 300, textAlign: "right" }}>
+              <div className="row gap-s" style={{ justifyContent: "flex-end" }}>
+                <button className="btn small" onClick={() => api.openPath(copy.path)}><FolderOpen size={14} /> Folder</button>
+                <button className="btn small" onClick={() => hide(copy)}><EyeOff size={14} /> Hide</button>
+                <button className="btn small danger" onClick={() => setAsk(copy)}><Trash2 size={14} /> Delete</button>
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody></table>
+      {ask && (
+        <ConfirmModal
+          title="Delete this copy from your PC?"
+          text={`${ask.path} is removed from the disk. The project on the server is not touched, but changes you have not submitted are lost.`}
+          word={project.name}
+          button="Delete the copy"
+          onConfirm={() => deleteLocal(ask)}
+          onClose={() => setAsk(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DangerZone({ project }: { project: Project }) {
+  const { server, isAdmin } = useStore();
+  const { deleteFromServer } = useDeletes();
+  const { go } = useStore();
+  const [ask, setAsk] = useState(false);
+  if (!project.onServer) return null;
+  return (
+    <div className="panel" style={{ borderColor: "color-mix(in srgb, var(--bad) 35%, var(--border-soft))", marginTop: 16 }}>
+      <h3>Delete from the server</h3>
+      <div className="desc">Removes {project.name} and its whole history from {server?.label}. Copies on PCs keep their files but can no longer sync. This cannot be undone.</div>
+      <div className="row">
+        <button className="btn danger" disabled={!isAdmin} onClick={() => setAsk(true)}><Trash2 size={16} /> Delete from the server</button>
+        {!isAdmin && <span className="faint">Administrators only</span>}
+      </div>
+      {ask && (
+        <ConfirmModal
+          title={`Delete ${project.name} from the server?`}
+          text="Everyone loses access to the project and its history. Make sure someone has a copy you want to keep."
+          word={project.name}
+          button="Delete from the server"
+          onConfirm={async () => { await deleteFromServer(project); go("projects"); }}
+          onClose={() => setAsk(false)}
+        />
+      )}
+    </div>
+  );
+}
 export function ProjectDetail() {
   const { projects, projectKey, go, server, reload, settings } = useStore();
   const { busy, openProject, clone, sync } = useProjectActions();
   const updates = useUpdates();
   const project = projects.find((p) => p.key === projectKey);
   const [tab, setTab] = useState<Tab>("overview");
-  const view = useProjectView(project ?? { key: "", name: "", onServer: false });
+  const view = useProjectView(project ?? { key: "", name: "", onServer: false, copies: [] });
   if (!project) return <Empty icon={<FolderOpen size={28} />} title="Project not found"><button className="btn" onClick={() => go("projects")}>Back to projects</button></Empty>;
 
   const working = busy[project.key];
@@ -260,13 +325,14 @@ export function ProjectDetail() {
                 </tbody></table>
               </div>
             )}
+            <Copies project={project} />
             {!project.onServer && <div className="banner">This project is only on this PC. Use <b>Add project</b> on the Projects page to put it on {server?.label ?? "the server"}.</div>}
           </div>
         )}
 
         {tab === "history" && (project.local ? <History path={project.local.path} /> : <Empty icon={<Download size={28} />} title="Clone the project to see its history">The history is read from the copy on your PC.</Empty>)}
         {tab === "access" && (project.id ? <Access repoId={project.id} repoName={view.name} /> : <div className="banner">Access can be set once the project is on the server.</div>)}
-        {tab === "settings" && <ProjectSettings projectKey={project.key} />}
+        {tab === "settings" && (<><ProjectSettings projectKey={project.key} /><DangerZone project={project} /></>)}
       </div>
     </>
   );

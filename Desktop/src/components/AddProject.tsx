@@ -7,6 +7,11 @@ import { invalidateStatus } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { Field, Modal, Spinner } from "./ui";
 
+/** Server names stay simple: letters, digits, dots, dashes and underscores. */
+function serverName(name: string): string {
+  return name.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 const IGNORE_TEMPLATE = `# Generated Unreal and workstation state
 /Saved/
 /Intermediate/
@@ -79,7 +84,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
       mark(0, "done");
 
       mark(1, "run");
-      let result = await api.lore(["repository", "create", `${server.loreUrl}/${name.trim()}`], folder, server.id);
+      let result = await api.lore(["repository", "create", `${server.loreUrl}/${serverName(name)}`], folder, server.id);
       if (!result.ok) return fail(1, result);
       mark(1, "done");
 
@@ -101,7 +106,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
       invalidateStatus();
       await reload();
       setDone(true);
-      toast(`${name} is on the server`, "good");
+      toast(`${serverName(name)} is on the server`, "good");
     } finally {
       setRunning(false);
     }
@@ -117,7 +122,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
         mode === "upload" && !done ? (
           <>
             <button className="btn" onClick={onClose} disabled={running}>Cancel</button>
-            <button className="btn primary" disabled={!folder || !name.trim() || running || !session} onClick={upload}>
+            <button className="btn primary" disabled={!folder || !serverName(name) || running || !session} onClick={upload}>
               {running ? <Spinner /> : <UploadCloud size={16} />} Upload to {server?.label ?? "server"}
             </button>
           </>
@@ -140,7 +145,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
               <button className="btn" onClick={pick}><FolderOpen size={16} /> Browse</button>
             </div>
           </Field>
-          <Field label="Name on the server">
+          <Field label="Name on the server" hint={serverName(name) && serverName(name) !== name.trim() ? `It will be called ${serverName(name)}. Names on the server cannot have spaces.` : "Letters, digits, dots, dashes and underscores."}>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <div className="muted" style={{ fontSize: 12.5 }}>

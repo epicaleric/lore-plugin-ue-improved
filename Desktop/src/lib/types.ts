@@ -41,6 +41,8 @@ export interface Settings {
   assignments: Record<string, string>;
   overrides: Record<string, ProjectOverride>;
   favorites: string[];
+  /** working copies the user chose not to see */
+  hidden: string[];
   accent: string;
   view: "grid" | "list";
   autoUpdate: { lore: boolean; plugin: boolean; app: boolean };
@@ -72,6 +74,8 @@ export interface Project {
   name: string;
   onServer: boolean;
   local?: LocalProject;
+  /** further working copies of the same project on this PC */
+  copies: LocalProject[];
 }
 
 export interface RepoStatus {
