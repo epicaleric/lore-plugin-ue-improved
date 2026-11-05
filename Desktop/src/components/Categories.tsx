@@ -25,14 +25,20 @@ export function descendants(categories: Category[], id: string): Set<string> {
 }
 
 export function CategoryModal({ category, parentId, onClose }: { category?: Category; parentId?: string; onClose: () => void }) {
-  const { settings, update, setCategory } = useStore();
+  const { settings, update, setCategory, server, isAdmin } = useStore();
+  const [people, setPeople] = useState<AdminUser[]>([]);
+  const [visibleTo, setVisibleTo] = useState<string[]>(category?.visibleTo ?? []);
+  const [limited, setLimited] = useState(!!category?.visibleTo?.length);
+  useEffect(() => {
+    if (server && isAdmin) adminApi.users(server).then(setPeople).catch(() => {});
+  }, []);
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(category?.color ?? CATEGORY_COLORS[settings.categories.length % CATEGORY_COLORS.length]);
   const [parent, setParent] = useState(category?.parentId ?? parentId ?? "");
   const blocked = category ? descendants(settings.categories, category.id) : new Set<string>();
 
   const save = () => {
-    const next: Category = { id: category?.id ?? uid(), name: name.trim(), color, parentId: parent || undefined };
+    const next: Category = { id: category?.id ?? uid(), name: name.trim(), color, parentId: parent || undefined, visibleTo: limited && visibleTo.length ? visibleTo : undefined };
     update({ categories: category ? settings.categories.map((c) => (c.id === next.id ? next : c)) : [...settings.categories, next] });
     onClose();
   };
@@ -68,6 +74,23 @@ export function CategoryModal({ category, parentId, onClose }: { category?: Cate
           <option value="">Top level</option>
           {settings.categories.filter((c) => !blocked.has(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+      </Field>
+      <Field label="Who sees this category" hint="This hides the category, and the projects in it, in Lore Hub. To really block a project, use Who has access.">
+        <select className="select" value={limited ? "some" : "all"} onChange={(e) => setLimited(e.target.value === "some")}>
+          <option value="all">Everyone</option>
+          <option value="some">Only the people I choose</option>
+        </select>
+        {limited && (
+          <div className="col" style={{ marginTop: 8, gap: 6 }}>
+            {people.filter((u) => !u.admin).map((u) => (
+              <label key={u.name} className="row gap-s">
+                <input type="checkbox" checked={visibleTo.includes(u.name)} onChange={(e) => setVisibleTo(e.target.checked ? [...visibleTo, u.name] : visibleTo.filter((n) => n !== u.name))} />
+                {u.displayName || u.name}
+              </label>
+            ))}
+            {people.length === 0 && <div className="faint">Administrators always see every category.</div>}
+          </div>
+        )}
       </Field>
       <Field label="Colour">
         <div className="swatches">

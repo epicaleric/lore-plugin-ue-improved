@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, adminApi } from "./api";
 import { parseInfo, parseRepoList } from "./parse";
 import { readableOn } from "./format";
-import type { Engine, LocalProject, Project, RemoteRepo, Server, SessionInfo, Settings } from "./types";
+import { SHARED_NAME, pullShared, pushShared, visibleCategories } from "./shared";
+import type { Category, Engine, LocalProject, Project, RemoteRepo, Server, SessionInfo, Settings } from "./types";
 
 export type View = "projects" | "project" | "admin" | "updates" | "settings";
 
@@ -35,6 +36,10 @@ interface Store {
   isAdmin: boolean;
   refreshSession: () => Promise<void>;
   remote: RemoteRepo[];
+  /** the server keeps the categories for everybody */
+  sharedActive: boolean;
+  /** categories this user may see */
+  categories: Category[];
   remoteError: string | null;
   locals: LocalProject[];
   projects: Project[];
@@ -60,6 +65,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [remote, setRemote] = useState<RemoteRepo[]>([]);
+  const [sharedActive, setSharedActive] = useState(false);
+  const sharedRef = useRef(false);
+  const adminRef = useRef(false);
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [locals, setLocals] = useState<LocalProject[]>([]);
   const [loading, setLoading] = useState(false);
@@ -76,6 +85,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setTimeout(() => setToasts((all) => all.filter((t) => t.id !== id)), kind === "bad" ? 7000 : 3800);
   }, []);
 
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
@@ -84,6 +95,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     settingsRef.current = next;
     setSettings(next);
     api.saveSettings(next).catch(() => {});
+
+    // Categories are kept on the server for everybody. Only administrators send changes.
+    if (("categories" in patch || "assignments" in patch) && sharedRef.current && adminRef.current) {
+      if (pushTimer.current) clearTimeout(pushTimer.current);
+      pushTimer.current = setTimeout(async () => {
+        const current = settingsRef.current;
+        const target = current.servers.find((s) => s.id === current.activeServer) ?? current.servers[0];
+        if (!target) return;
+        try {
+          await pushShared(target, { version: 1, categories: current.categories, assignments: current.assignments });
+        } catch (error) {
+          toastRef.current(`The categories were not saved on the server: ${error}`, "bad");
+        }
+      }, 800);
+    }
   }, []);
 
   const server = settings.servers.find((s) => s.id === settings.activeServer) ?? settings.servers[0];
@@ -105,8 +131,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (info) {
       adminApi
         .me(server)
-        .then((me) => setIsAdmin(me.admin))
-        .catch(() => setIsAdmin(false));
+        .then((me) => { adminRef.current = me.admin; setIsAdmin(me.admin); })
+        .catch(() => { adminRef.current = false; setIsAdmin(false); });
     } else {
       setIsAdmin(false);
     }
@@ -126,8 +152,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && (await api.session(active.id).catch(() => null))) {
         const result = await api.lore(["repository", "list", active.loreUrl], null, active.id);
         if (result.ok) {
-          setRemote(parseRepoList(result.stdout));
+          const all = parseRepoList(result.stdout);
+          const hasShared = all.some((r) => r.name === SHARED_NAME);
+          sharedRef.current = hasShared;
+          setSharedActive(hasShared);
+          setRemote(all.filter((r) => r.name !== SHARED_NAME));
           setRemoteError(null);
+          if (hasShared) {
+            try {
+              const shared = await pullShared(active);
+              if (shared) {
+                const next = { ...settingsRef.current, categories: shared.categories, assignments: shared.assignments };
+                settingsRef.current = next;
+                setSettings(next);
+                api.saveSettings(next).catch(() => {});
+              }
+            } catch (error) {
+              toastRef.current(`Could not load the shared categories: ${error}`, "bad");
+            }
+          }
         } else {
           setRemote([]);
           setRemoteError((result.stderr || result.stdout).trim().split("\n")[0] || "Could not list the projects");
@@ -170,6 +213,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     reloadEngines();
   }, [ready, server?.id]);
 
+  const categories = useMemo(() => visibleCategories(settings.categories, session?.userName, isAdmin), [settings.categories, session?.userName, isAdmin]);
+
   const projects = useMemo<Project[]>(() => {
     // One project can have several working copies on this PC; the first one is shown, the others are listed in its details.
     const visible = locals.filter((l) => !settings.hidden.includes(l.path));
@@ -190,8 +235,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         list.push({ key, id: copies[0].repoId, name: copies[0].repoName ?? copies[0].name, onServer: false, local: copies[0], copies: copies.slice(1) });
       }
     }
-    return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [remote, locals, settings.hidden]);
+    // Projects in a category this user may not see are left out as well.
+    const shown = new Set(categories.map((c) => c.id));
+    const known = new Set(settings.categories.map((c) => c.id));
+    const allowed = list.filter((p) => {
+      const assigned = p.id ? settings.assignments[p.id] : undefined;
+      return !assigned || !known.has(assigned) || shown.has(assigned);
+    });
+    return allowed.sort((a, b) => a.name.localeCompare(b.name));
+  }, [remote, locals, settings.hidden, settings.assignments, settings.categories, categories]);
 
   const go = useCallback((next: View, key?: string | null) => {
     setView(next);
@@ -208,6 +260,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     isAdmin,
     refreshSession,
     remote,
+    sharedActive,
+    categories,
     remoteError,
     locals,
     projects,

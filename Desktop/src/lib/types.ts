@@ -24,6 +24,8 @@ export interface Category {
   name: string;
   color: string;
   parentId?: string;
+  /** user names that may see this category; empty or missing means everyone */
+  visibleTo?: string[];
 }
 
 export interface ProjectOverride {
@@ -46,6 +48,14 @@ export interface Settings {
   accent: string;
   view: "grid" | "list";
   autoUpdate: { lore: boolean; plugin: boolean; app: boolean };
+}
+
+/** What is kept on the server, in the shared-settings project, for everyone. */
+export interface SharedConfig {
+  version: 1;
+  categories: Category[];
+  /** repository id -> category id */
+  assignments: Record<string, string>;
 }
 
 export interface RemoteRepo {

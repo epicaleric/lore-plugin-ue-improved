@@ -9,7 +9,8 @@ import { useMenu } from "./ui";
 import type { Category } from "../lib/types";
 
 export function Sidebar() {
-  const { settings, server, session, view, go, category, setCategory, projects, isAdmin, setServer } = useStore();
+  const { settings, server, session, view, go, category, setCategory, projects, isAdmin, setServer, categories, sharedActive } = useStore();
+  const canEdit = !sharedActive || isAdmin;
   const updates = useUpdates();
   const menu = useMenu();
   const [editing, setEditing] = useState<{ category?: Category; parentId?: string } | null>(null);
@@ -26,7 +27,7 @@ export function Sidebar() {
   );
 
   const countIn = (id: string) => projects.filter((p) => p.id && settings.assignments[p.id] === id).length;
-  const roots = settings.categories.filter((c) => !c.parentId);
+  const roots = categories.filter((c) => !c.parentId);
 
   const renderCategory = (c: Category, depth: number): React.ReactNode => (
     <div key={c.id}>
@@ -38,7 +39,7 @@ export function Sidebar() {
           go("projects");
         }}
         onContextMenu={(e) =>
-          menu.open(e, [
+          canEdit && menu.open(e, [
             { label: "Edit category", onClick: () => setEditing({ category: c }) },
             { label: "New category inside", onClick: () => setEditing({ parentId: c.id }) },
             { label: "Who has access", icon: <Users size={15} />, onClick: () => setAccess(c) },
@@ -48,7 +49,7 @@ export function Sidebar() {
         <span className="cat-row"><span className="cat-dot" style={{ background: c.color }} />{c.name}</span>
         <span className="count">{countIn(c.id) || ""}</span>
       </button>
-      {settings.categories.filter((child) => child.parentId === c.id).map((child) => renderCategory(child, depth + 1))}
+      {categories.filter((child) => child.parentId === c.id).map((child) => renderCategory(child, depth + 1))}
     </div>
   );
 
@@ -83,15 +84,15 @@ export function Sidebar() {
         {nav("projects", "Projects", <LayoutGrid size={18} />, <span className="count">{projects.length}</span>)}
         <div className="nav-group-title row between" style={{ paddingRight: 4 }}>
           <span>Categories</span>
-          <button className="btn icon small ghost" style={{ width: 24, height: 24 }} title="New category" onClick={() => setEditing({})}><Plus size={14} /></button>
+          {canEdit && <button className="btn icon small ghost" style={{ width: 24, height: 24 }} title="New category" onClick={() => setEditing({})}><Plus size={14} /></button>}
         </div>
-        {settings.categories.length > 0 && (
+        {categories.length > 0 && (
           <button className={`nav-item ${category === "all" && view === "projects" ? "active" : ""}`} onClick={() => { setCategory("all"); go("projects"); }}>
             <span className="cat-row"><span className="cat-dot" style={{ background: "var(--faint)" }} />All projects</span>
           </button>
         )}
         {roots.map((c) => renderCategory(c, 0))}
-        {settings.categories.length === 0 && <div className="faint" style={{ padding: "2px 12px", fontSize: 12.5 }}>Group your projects, for example by product.</div>}
+        {categories.length === 0 && <div className="faint" style={{ padding: "2px 12px", fontSize: 12.5 }}>Group your projects, for example by product.</div>}
       </div>
 
       <div className="sidebar-foot">

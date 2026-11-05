@@ -146,7 +146,7 @@ function ListRow({ project, onOpen }: { project: Project; onOpen: () => void }) 
 }
 
 export function Projects() {
-  const { projects, settings, update, loading, reload, go, server, session, remoteError, category, setCategory } = useStore();
+  const { projects, settings, update, loading, reload, go, server, session, remoteError, category, setCategory, categories } = useStore();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [signIn, setSignIn] = useState(false);
@@ -158,7 +158,7 @@ export function Projects() {
     let grew = true;
     while (grew) {
       grew = false;
-      for (const c of settings.categories) {
+      for (const c of categories) {
         if (c.parentId && ids.has(c.parentId) && !ids.has(c.id)) {
           ids.add(c.id);
           grew = true;
@@ -166,7 +166,7 @@ export function Projects() {
       }
     }
     return ids;
-  }, [category, settings.categories]);
+  }, [category, categories]);
 
   const shown = projects.filter((p) => {
     if (query && !p.name.toLowerCase().includes(query.toLowerCase())) return false;
@@ -181,7 +181,7 @@ export function Projects() {
     return true;
   });
 
-  const title = category === "all" ? "Projects" : settings.categories.find((c) => c.id === category)?.name ?? "Projects";
+  const title = category === "all" ? "Projects" : categories.find((c) => c.id === category)?.name ?? "Projects";
   const chip = (id: Filter, label: string) => (
     <button key={id} className={`btn small ${filter === id ? "primary" : "ghost"}`} onClick={() => setFilter(id)}>{label}</button>
   );

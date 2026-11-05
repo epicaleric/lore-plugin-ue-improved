@@ -25,6 +25,11 @@ export const api = {
   openPath: (path: string) => invoke<void>("open_path", { path }),
   pluginVersion: (target: string, kind: "engine" | "project") => invoke<string | null>("plugin_version", { projectOrEngine: target, kind }),
 
+  metaDir: (serverId: string) => invoke<string>("meta_dir", { serverId }),
+  readText: (path: string) => invoke<string | null>("read_text_file", { path }),
+  exists: (path: string) => invoke<boolean>("path_exists", { path }),
+  writeText: (path: string, contents: string) => invoke<boolean>("write_text_file", { path, contents, overwrite: true }),
+
   getJson: <T = any>(url: string) => invoke<T>("http_get_json", { url }),
   getText: (url: string) => invoke<string>("http_get_text", { url }),
   installLoreClient: (url: string) => invoke<void>("install_lore_client", { url }),

@@ -242,6 +242,11 @@ pub fn delete_folder(path: String) -> Result<(), String> {
 pub fn path_exists(path: String) -> bool {
     Path::new(&path).exists()
 }
+
+#[tauri::command]
+pub fn read_text_file(path: String) -> Option<String> {
+    std::fs::read_to_string(path).ok()
+}
 // ------------------------------------------------------------------ web
 
 #[tauri::command]

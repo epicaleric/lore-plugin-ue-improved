@@ -32,6 +32,14 @@ fn save_settings(app: AppHandle, settings: Value) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
+/// Folder for the shared-settings working copy of a server. The parent is created, the folder itself is left to `lore clone`.
+#[tauri::command]
+fn meta_dir(app: AppHandle, server_id: String) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("meta");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join(server_id).to_string_lossy().to_string())
+}
+
 // ------------------------------------------------------------------ sign-in
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -188,6 +196,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
+            meta_dir,
+            system::read_text_file,
             sign_in,
             sign_in_api_key,
             session_info,

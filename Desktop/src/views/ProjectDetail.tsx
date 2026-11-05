@@ -125,7 +125,7 @@ function Access({ repoId, repoName }: { repoId: string; repoName: string }) {
 }
 
 function ProjectSettings({ projectKey }: { projectKey: string }) {
-  const { projects, settings, update, engines, toast } = useStore();
+  const { projects, settings, update, engines, toast, categories } = useStore();
   const project = projects.find((p) => p.key === projectKey)!;
   const id = project.id;
   const override = (id && settings.overrides[id]) || {};
@@ -164,7 +164,7 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
           }}
         >
           <option value="">No category</option>
-          {settings.categories.map((c) => <option key={c.id} value={c.id}>{c.parentId ? "   " : ""}{c.name}</option>)}
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.parentId ? "   " : ""}{c.name}</option>)}
         </select>
       </Field>
       <Field label="Thumbnail">
@@ -245,7 +245,7 @@ function DangerZone({ project }: { project: Project }) {
   );
 }
 export function ProjectDetail() {
-  const { projects, projectKey, go, server, reload, settings } = useStore();
+  const { projects, projectKey, go, server, reload, settings, categories } = useStore();
   const { busy, openProject, clone, sync } = useProjectActions();
   const updates = useUpdates();
   const project = projects.find((p) => p.key === projectKey);
@@ -255,7 +255,7 @@ export function ProjectDetail() {
 
   const working = busy[project.key];
   const behind = view.status ? view.status.remoteRevision - view.status.localRevision : 0;
-  const category = project.id ? settings.categories.find((c) => c.id === settings.assignments[project.id!]) : undefined;
+  const category = project.id ? categories.find((c) => c.id === settings.assignments[project.id!]) : undefined;
   const pluginOld = pluginIsOutdated(project.local?.plugin ?? null, updates.plugin.latest);
   const pluginBusy = !!updates.busy[`plugin:${project.local?.path}`];
 

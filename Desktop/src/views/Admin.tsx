@@ -3,6 +3,8 @@ import { Ban, Check, KeyRound, Lock, MoreHorizontal, RefreshCw, ShieldCheck, Shi
 import { Avatar, Empty, Field, Modal, Pill, Spinner, Switch, useMenu } from "../components/ui";
 import { adminApi, api } from "../lib/api";
 import { useStore } from "../lib/store";
+import { SHARED_NAME, createShared, shareWithEveryone } from "../lib/shared";
+import { ConfirmModal } from "../components/Danger";
 import type { AdminUser, Grant } from "../lib/types";
 
 type Tab = "users" | "access" | "server";
@@ -161,6 +163,54 @@ function Matrix({ users, grants, repos, reload }: { users: AdminUser[]; grants: 
   );
 }
 
+function SharedPanel() {
+  const { server, settings, sharedActive, reload, toast } = useStore();
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  if (!server) return null;
+  const run = async (work: () => Promise<void>) => {
+    setBusy(true);
+    try { await work(); } catch (e) { toast(String(e).replace(/^Error: /, ""), "bad"); } finally { setBusy(false); }
+  };
+  return (
+    <div className="panel">
+      <h3>Shared categories</h3>
+      {sharedActive ? (
+        <>
+          <div className="muted" style={{ marginBottom: 10 }}>
+            Categories and the projects in them are kept in the project <span className="mono">{SHARED_NAME}</span> on this server, so everybody sees the same. Only administrators can change them. New users need read access to that project.
+          </div>
+          <button className="btn" disabled={busy} onClick={() => run(async () => {
+            const added = await shareWithEveryone(server);
+            toast(added ? `${added} user${added === 1 ? "" : "s"} can now read the shared categories` : "Everybody already has access", "good");
+          })}>{busy ? <Spinner size={14} /> : <Check size={16} />} Give every user access</button>
+        </>
+      ) : (
+        <>
+          <div className="muted" style={{ marginBottom: 10 }}>
+            Right now the categories only exist on this PC. Keep them on the server instead: a small project called <span className="mono">{SHARED_NAME}</span> is created, with your {settings.categories.length} categor{settings.categories.length === 1 ? "y" : "ies"} in it, and every user gets read access to it. Nothing else on the server changes.
+          </div>
+          <button className="btn primary" disabled={busy} onClick={() => setConfirm(true)}>Keep categories on the server</button>
+        </>
+      )}
+      {confirm && (
+        <ConfirmModal
+          title="Keep the categories on the server?"
+          text={`This adds the project ${SHARED_NAME} to ${server.label} and gives every user read access to it.`}
+          word="share"
+          button="Create it"
+          onClose={() => setConfirm(false)}
+          onConfirm={() => run(async () => {
+            await createShared(server, { version: 1, categories: settings.categories, assignments: settings.assignments });
+            toast("The categories are on the server now", "good");
+            await reload();
+          })}
+        />
+      )}
+    </div>
+  );
+}
+
 function ServerTab({ users, repos }: { users: AdminUser[]; repos: unknown[] }) {
   const { server } = useStore();
   const [health, setHealth] = useState<{ lore: { ok: boolean; ms: number }; auth: { ok: boolean; ms: number } } | null>(null);
@@ -186,6 +236,7 @@ function ServerTab({ users, repos }: { users: AdminUser[]; repos: unknown[] }) {
           {row("Users", users.length)}
         </tbody></table>
       </div>
+      <SharedPanel />
       <div className="panel">
         <h3>Addresses</h3>
         <table className="table"><tbody>
