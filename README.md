@@ -1,123 +1,92 @@
 # Lore Source Control for Unreal Engine
 
-> Based on [ScottRaffertyCG/lore-ue](https://github.com/ScottRaffertyCG/lore-ue) (MIT, originally by Pyre Labs). This repository adds the Lore History window, check-in tab, Gemini descriptions and lock fixes described below.
+Revision control for Unreal Engine projects on [Lore](https://github.com/EpicGames/lore), with a
+**Lore History window** that works like the revision control in UEFN: a timeline of revisions, a check-in
+tab with one-click submit, file locks, server status and AI-written descriptions.
 
-**Native [Lore](https://github.com/EpicGames/lore) revision control inside the Unreal Editor.**
-
-This plugin adds Lore as a source control provider in Unreal Engine, alongside the
-engine's built-in Perforce, Git, and Subversion providers. It drives the public
-`lore` command-line interface as a child process, so there is no native library to
-build or link.
-
-> **Note**
-> This plugin is pre-1.0 and tracks Lore while Lore itself is pre-1.0. Behavior and
-> on-disk formats may change between releases.
-
-## Supported Engine Versions
-
-| Unreal Engine | Status |
-| --- | --- |
-| 5.5 | Supported |
-| 5.6 | Supported |
-| 5.7 | Supported (primary development target) |
-| 5.8 | Supported |
-
-## Requirements
-
-- Unreal Engine 5.5, 5.6, 5.7, or 5.8
-- The [`lore` CLI](https://github.com/EpicGames/lore) installed and on your `PATH`
-  (or point the plugin at it in settings)
-- An existing Lore working copy for your project (run `lore` once to initialize or
-  sync a repository in your project directory)
-
-## Install
-
-1. Copy or unzip the `LoreSourceControl` folder into your project's `Plugins` directory:
-
-```text
-<YourProject>/Plugins/LoreSourceControl/
-```
-
-2. Regenerate project files and build the Editor target.
-3. Launch the editor, open **Revision Control > Change Source Control Settings**,
-   and choose **Lore** as the provider.
-
-If `lore` is not on your `PATH`, set the executable path in the Lore settings panel.
+It adds Lore as a provider next to Perforce, Git and Subversion in **Revision Control**, and adds a window
+that shows what your team has done, lets you go back to an earlier version, and submits your own work.
 
 ![Revision Control Settings panel showing Lore selected as the provider](Media/revision-control-settings.png)
 
-## Overview
+## What you get
 
-- **Status overlays** — modified, added, deleted, and locked assets are surfaced in
-  the Content Browser, including files changed locally without an explicit checkout.
-- **Check out / check in** — acquire and release Lore locks, then stage, commit, and
-  push from the editor's submit dialog.
-- **Sync and history** — pull the latest revisions and view per-file history and
-  diffs against the head revision.
-- **Lock awareness** — files locked by other users are shown and protected from
-  accidental submission.
-- **Fail-closed submits** — check-in re-verifies lock ownership and head state before
-  it mutates anything.
+- **History** - every revision with author, date and description. Expand one to see the files that changed.
+  Go back to a revision for the whole project or for a single file. Nothing is ever rewritten: going back
+  creates a new revision.
+- **Changes** - tick the files you changed, write a description (or let the AI write it) and press **Submit**.
+  The plugin stages, commits and pushes in one step. Optionally keep your files checked out.
+- **Locks** - see who has which file checked out, and unlock files when needed. Your own locks are
+  remembered and restored after the Lore server restarts.
+- **Server** - whether the server is online, how fast it answers, repository facts, your login, and a check
+  for newer versions of the Lore client and of this plugin.
+- **Settings** - accent colour and avatar colour (any colour), identity name, the server address, and the
+  Gemini settings.
+- **Auto check-out** - saving an asset checks it out for you (`Lore.AutoCheckOutOnSave`, on by default).
+- **Status overlays** in the Content Browser for modified, added, deleted and locked assets.
 
-## Identity vs. authentication
+## AI descriptions (optional)
 
-The **Identity** field in the Lore settings panel is **not a login**. It is a display
-label (passed to `lore --identity`) that is attributed to your commits and locks so
-teammates can see who did what. It has no password and grants no access.
+Press **Generate** in the Changes tab and Google Gemini writes the description from the file names and change
+types. File contents are never sent.
 
-Server **authentication** — when a Lore server requires it — is handled entirely by
-the `lore` CLI itself (for example via `lore login` or the server's configured
-credential flow), not by this plugin. The plugin never stores or transmits passwords.
+- Written in the past tense, as a record of what was done, in any language you type in the settings.
+- Uses the newest Gemini *flash* model your key can use, and moves on to the next flash model by itself when a
+  usage limit is reached.
+- The API key is typed by you and stored only in `Saved/Config` on your computer, never in the repository.
+- On Google's free tier, prompts may be used to improve Google's products. Use a paid key if that matters.
+
+## Requirements
+
+- Unreal Engine 5.8 (see [compatibility](#compatibility))
+- The [`lore` CLI](https://github.com/EpicGames/lore) on your `PATH`, or its path set in the plugin settings
+- A Lore working copy for your project (clone your repository with `lore clone`)
+
+## Install
+
+1. Copy the `LoreSourceControl` folder into `<YourProject>/Plugins/`. This repository is that folder.
+2. Regenerate project files and build the editor target.
+3. In the editor choose **Revision Control > Connect to Revision Control**, then **Lore** as the provider.
+4. Open the window from **Window > Developer Tools > Lore History**, or run `Lore.ShowHistory`.
+
+If `lore` is not on your `PATH`, set the executable path in the Lore settings panel.
+
+## Identity and login
+
+The **Identity** setting is a display name passed to `lore --identity`. It is not a login. Authentication
+against a Lore server is handled by the `lore` CLI (for example `lore login`). The plugin never stores or sends
+passwords. Leave Identity empty to use the name you are logged in with.
+
+## Compatibility
+
+| Unreal Engine | Status |
+| --- | --- |
+| 5.8 | Built and used daily |
+| 5.5 - 5.7 | Inherited from the original plugin, not tested with the History window |
 
 ## How it works
 
-Every operation maps to a `lore` CLI invocation. The plugin parses the CLI's
-human-readable output to build Unreal's source control state, runs work on background
-threads, and refreshes overlays on the game thread. Asset saves trigger a status
-refresh so freshly edited files show the correct state without a manual refresh.
+Every operation maps to a `lore` command. The plugin reads the command output to build Unreal's source control
+state, runs work on background threads and refreshes the overlays on the game thread. Lore keeps locks in
+memory on the server, so the plugin saves your own locks in `Saved/Lore/MyLocks.txt` and takes them back for
+files you are still editing.
 
-## Known pre-1.0 limitations
+## Known limitations
 
-- `lore file history` is fetched once per file on large Content Browser selections;
-  batch history is not yet supported.
-- `TryToDownloadFileFromBackgroundThread` is not yet implemented; diff materializes
-  synchronously via `lore file write`.
-- Cancellation of in-flight `lore` commands is not supported; operations run to
-  completion or time out.
-- Changelists, shelve/unshelve, and cross-branch state warnings are not implemented.
+- Lore is pre-1.0 and changes between releases. Keep the client and the server on the same version.
+- The server address is stored in the working copy and cannot be changed from the plugin.
+- Diff from the History window is not available yet.
+- Changelists, shelving and cross-branch state are not implemented.
 
-## Lore History window (extra features)
+## Changelog
 
-Open it from **Window > Developer Tools > Lore History**, or with the console command `Lore.ShowHistory`.
-It is modelled on the Branch History / Check-in windows of UEFN's revision control.
+See [CHANGELOG.md](CHANGELOG.md).
 
-- **History** - a timeline of revisions with author, date and description. Expand a revision to see the
-  changed files (added / modified / deleted). Right-click a file for **History**, **Undo this change** and
-  **Copy path**. Filter by author, text, date or number. **Undo** reverts a whole revision and the download
-  button puts the whole project back to that revision. Both create a *new* revision, so history is never rewritten.
-- **Changes** - a check-in window: pick the changed files, write a description and **Submit**
-  (stage, commit and push in one step). Optionally keep files checked out.
-- **Description with Gemini (optional)** - press **Generate** to let the Google Gemini API write the
-  description from the file names and change types (never file contents). The API key is typed by you and
-  stored only in `Saved/Config` on your machine. Description language: English or Dutch.
-- **Locks** - who has which file checked out, with **Unlock** (and **Unlock all mine**).
-- **Sync Latest** - shown when the server has newer revisions.
+## Credits and license
 
-Other changes:
+This plugin started from [ScottRaffertyCG/lore-ue](https://github.com/ScottRaffertyCG/lore-ue) (MIT, Pyre Labs),
+which provides the Lore provider itself. The History window, check-in tab, locks handling, AI descriptions,
+settings and the rest of the editor UI were added on top of it here.
 
-- The plugin now detects the logged-in Lore user (`lore auth info`) so locks reported under that name are
-  recognised as yours when a server with authentication is used.
-- Locks are released one file at a time after a submit, because `lore lock release` stops at the first file
-  that is not locked.
-- A submit moves the branch head onto the new revision (`lore branch reset`) before pushing.
-- Auto check-out after saving an asset (console variable `Lore.AutoCheckOutOnSave`, default on).
-
-Tested on Unreal Engine 5.8 only; the new window uses standard Slate APIs but has not been built on 5.5 to 5.7.
-
-## License
-
-Released under the MIT License. See [LICENSE](LICENSE).
-
-Unreal Engine and Epic Games are trademarks or registered trademarks of Epic Games,
-Inc. Lore is a project of Epic Games, Inc. This plugin is an independent integration
-and references Unreal Engine public interfaces by include name only.
+Released under the MIT License, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Unreal Engine and Epic Games are
+trademarks of Epic Games, Inc. Lore is a project of Epic Games, Inc. This plugin is an independent integration.

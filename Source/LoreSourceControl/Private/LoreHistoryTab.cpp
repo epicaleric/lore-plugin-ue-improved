@@ -18,6 +18,12 @@
 #include "HAL/PlatformApplicationMisc.h"
 #include "InputCoreTypes.h"
 #include "HAL/PlatformProcess.h"
+#include "Fonts/FontMeasure.h"
+#include "Rendering/DrawElements.h"
+#include "Rendering/SlateRenderer.h"
+#include "Styling/CoreStyle.h"
+#include "Widgets/Colors/SColorPicker.h"
+#include "Widgets/SLeafWidget.h"
 #include "Interfaces/IPluginManager.h"
 #include "LoreSourceControlModule.h"
 #include "HttpModule.h"
@@ -59,6 +65,7 @@ namespace
 {
 	const FName LoreHistoryTabName(TEXT("LoreHistory"));
 	constexpr int32 HistoryCount = 40;
+	const FString PluginRepositoryUrl(TEXT("https://github.com/epicaleric/lore-source-control-ue"));
 
 	using FContext = LoreSourceControlUtils::FLoreCommandContext;
 
@@ -740,13 +747,59 @@ namespace
 	FString OwnAvatarColorId;
 	FString OwnUserName;
 
-	void ApplyAccent(const FString& InId)
+	/** A saved colour is either a preset id ("teal") or a hex value ("1AA0A5"). */
+	bool ParseColorValue(const FString& InValue, FColor& OutColor)
 	{
-		const FThemeColor* Found = FindThemeColor(InId);
-		Accent = FLinearColor::FromSRGBColor(Found ? Found->Srgb : ThemeColors()[0].Srgb);
+		if (const FThemeColor* Preset = FindThemeColor(InValue))
+		{
+			OutColor = Preset->Srgb;
+			return true;
+		}
+		if (InValue.Len() != 6)
+		{
+			return false;
+		}
+		for (const TCHAR Char : InValue)
+		{
+			if (!FChar::IsHexDigit(Char))
+			{
+				return false;
+			}
+		}
+		OutColor = FColor::FromHex(InValue);
+		return true;
+	}
+
+	FString ColorToValue(const FLinearColor& InColor)
+	{
+		return InColor.ToFColor(true).ToHex().Left(6);
+	}
+
+	FLinearColor ColorFromValue(const FString& InValue, const FLinearColor& InFallback)
+	{
+		FColor Parsed;
+		return ParseColorValue(InValue, Parsed) ? FLinearColor::FromSRGBColor(Parsed) : InFallback;
+	}
+
+	/** Dark text on light backgrounds, white text on dark ones, so letters stay readable on any colour. */
+	FSlateColor ContrastFor(const FLinearColor& InBackground)
+	{
+		const float Luminance = 0.2126f * InBackground.R + 0.7152f * InBackground.G + 0.0722f * InBackground.B;
+		return Luminance > 0.25f ? FSlateColor(FLinearColor(0.01f, 0.01f, 0.012f, 1.0f)) : FSlateColor(FLinearColor::White);
+	}
+
+	void ApplyAccent(const FString& InValue)
+	{
+		Accent = ColorFromValue(InValue, FLinearColor::FromSRGBColor(ThemeColors()[0].Srgb));
 		AccentPillBrush.TintColor = FSlateColor(Accent);
 		DotBrush.TintColor = FSlateColor(Accent);
 		HeadBrush.TintColor = FSlateColor(Accent);
+	}
+
+	/** Lighter version of the accent, used for headings so they stand out from the text below. */
+	FLinearColor HeadingColor()
+	{
+		return FMath::Lerp(Accent, FLinearColor::White, 0.65f);
 	}
 
 	void LoadTheme()
@@ -945,31 +998,74 @@ namespace
 		return FString::Printf(TEXT("%d %s %d, %02d:%02d"), Local.GetDay(), Months[Local.GetMonth() - 1], Local.GetYear(), Local.GetHour(), Local.GetMinute());
 	}
 
+	/** The colour other people's avatars get, derived from their name. */
+	FLinearColor HashAvatarColor(const FString& InName)
+	{
+		const uint32 Hash = GetTypeHash(InName.ToLower());
+		return FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash % 256), 130, 200).CopyWithNewOpacity(1.0f);
+	}
+
 	FLinearColor AvatarColorFor(const FString& InName)
 	{
 		// The signed-in user can pick their own colour on the Settings tab.
-		if (!OwnAvatarColorId.IsEmpty() && !OwnUserName.IsEmpty() && InName.Equals(OwnUserName, ESearchCase::IgnoreCase))
+		FColor Chosen;
+		if (!OwnUserName.IsEmpty() && InName.Equals(OwnUserName, ESearchCase::IgnoreCase) && ParseColorValue(OwnAvatarColorId, Chosen))
 		{
-			if (const FThemeColor* Chosen = FindThemeColor(OwnAvatarColorId))
-			{
-				return FLinearColor::FromSRGBColor(Chosen->Srgb);
-			}
+			return FLinearColor::FromSRGBColor(Chosen);
 		}
-		const uint32 Hash = GetTypeHash(InName.ToLower());
-		return FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash % 256), 130, 200).CopyWithNewOpacity(1.0f);
+		return HashAvatarColor(InName);
 	}
 
 	/** A round avatar with the author's initial. */
 	TSharedRef<SWidget> MakeAvatar(const FString& InAuthor, float InSize = 24.0f)
 	{
 		const FString Initial = InAuthor.IsEmpty() ? FString(TEXT("?")) : InAuthor.Left(1).ToUpper();
+		const FLinearColor Background = AvatarColorFor(InAuthor);
 		return SNew(SBox).WidthOverride(InSize).HeightOverride(InSize)
 			[
-				SNew(SBorder).BorderImage(&AvatarBrush).BorderBackgroundColor(AvatarColorFor(InAuthor)).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(0.0f)
+				SNew(SBorder).BorderImage(&AvatarBrush).BorderBackgroundColor(Background).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(0.0f)
 				[
-					SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(FText::FromString(Initial))
+					SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).ColorAndOpacity(ContrastFor(Background)).Text(FText::FromString(Initial))
 				]
 			];
+	}
+
+	/** Pick a random colour for the signed-in user the first time, one that no other known author already has. */
+	void EnsureOwnAvatarColor(const TArray<FString>& InOtherAuthors)
+	{
+		FColor Existing;
+		if (OwnUserName.IsEmpty() || ParseColorValue(OwnAvatarColorId, Existing))
+		{
+			return;
+		}
+		TArray<float> TakenHues;
+		for (const FString& Other : InOtherAuthors)
+		{
+			if (!Other.Equals(OwnUserName, ESearchCase::IgnoreCase))
+			{
+				TakenHues.Add(HashAvatarColor(Other).LinearRGBToHSV().R);
+			}
+		}
+		float BestHue = FMath::FRand() * 360.0f;
+		float BestDistance = -1.0f;
+		for (int32 Try = 0; Try < 24; ++Try)
+		{
+			const float Hue = FMath::FRand() * 360.0f;
+			float Nearest = 360.0f;
+			for (const float Taken : TakenHues)
+			{
+				const float Delta = FMath::Abs(Hue - Taken);
+				Nearest = FMath::Min(Nearest, FMath::Min(Delta, 360.0f - Delta));
+			}
+			if (Nearest > BestDistance)
+			{
+				BestDistance = Nearest;
+				BestHue = Hue;
+			}
+		}
+		const FLinearColor Picked = FLinearColor::MakeFromHSV8(static_cast<uint8>(BestHue / 360.0f * 255.0f), 150, 215);
+		OwnAvatarColorId = ColorToValue(Picked);
+		SaveUiSetting(TEXT("AvatarColor"), OwnAvatarColorId);
 	}
 
 	/** A small rounded count badge, hidden while the count is zero. */
@@ -978,14 +1074,14 @@ namespace
 		return SNew(SBorder).BorderImage(&AccentPillBrush).Padding(FMargin(6.0f, 1.0f))
 			.Visibility_Lambda([InCount]() { return InCount() > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
 			[
-				SNew(STextBlock).Font(FAppStyle::GetFontStyle("SmallFont")).Text_Lambda([InCount]() { return FText::AsNumber(InCount()); })
+				SNew(STextBlock).Font(FAppStyle::GetFontStyle("SmallFont")).ColorAndOpacity_Lambda([]() { return ContrastFor(Accent); }).Text_Lambda([InCount]() { return FText::AsNumber(InCount()); })
 			];
 	}
 
 	/** Section heading used inside cards. */
 	TSharedRef<SWidget> MakeCardTitle(const FText& InTitle)
 	{
-		return SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(InTitle);
+		return SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Bold", 12)).ColorAndOpacity_Lambda([]() { return FSlateColor(HeadingColor()); }).Text(InTitle);
 	}
 
 	// ------------------------------------------------------------------ data helpers
@@ -1224,6 +1320,123 @@ namespace
 	}
 }
 
+// ------------------------------------------------------------------------- AI button
+
+/** A pill with a gradient outline and sparkles, used to ask the AI for a description. */
+class SLoreAiButton : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SLoreAiButton) : _IsBusy(false) {}
+		SLATE_ATTRIBUTE(bool, IsBusy)
+		SLATE_EVENT(FOnClicked, OnClicked)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		IsBusy = InArgs._IsBusy;
+		OnClicked = InArgs._OnClicked;
+		SetCursor(EMouseCursor::Hand);
+	}
+
+	virtual FVector2D ComputeDesiredSize(float) const override
+	{
+		return FVector2D(Width, Height);
+	}
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	{
+		static const FSlateRoundedBoxBrush InnerBrush(FLinearColor::White, Height * 0.5f - 2.0f);
+		const bool bBusy = IsBusy.Get(false);
+		const float Fade = bBusy ? 0.55f : 1.0f;
+		const FVector2f Size = AllottedGeometry.GetLocalSize();
+
+		FLinearColor Left = ShiftHue(Accent, -40.0f);
+		FLinearColor Right = ShiftHue(Accent, 55.0f);
+		Left.A = Fade;
+		Right.A = Fade;
+
+		TArray<FSlateGradientStop> Stops;
+		Stops.Add(FSlateGradientStop(FVector2f(0.0f, 0.0f), Left));
+		Stops.Add(FSlateGradientStop(Size, Right));
+		FSlateDrawElement::MakeGradient(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), Stops, Orient_Vertical, ESlateDrawEffect::NoGamma, FVector4f(Height * 0.5f));
+
+		const FLinearColor Fill = IsHovered() ? FLinearColor(0.045f, 0.045f, 0.06f, 1.0f) : FLinearColor(0.010f, 0.010f, 0.014f, 1.0f);
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1,
+			AllottedGeometry.ToPaintGeometry(Size - FVector2f(4.0f, 4.0f), FSlateLayoutTransform(FVector2f(2.0f, 2.0f))),
+			&InnerBrush, ESlateDrawEffect::None, Fill);
+
+		// Sparkles, filled by stacking shrinking outlines.
+		const FLinearColor Sparkle = FLinearColor::LerpUsingHSV(Left, Right, 0.35f);
+		DrawSparkle(OutDrawElements, LayerId + 2, AllottedGeometry, FVector2f(17.0f, Size.Y * 0.5f + 1.5f), 7.5f, Sparkle);
+		DrawSparkle(OutDrawElements, LayerId + 2, AllottedGeometry, FVector2f(28.0f, Size.Y * 0.5f - 6.0f), 4.0f, Sparkle);
+
+		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 10);
+		const FString Label = bBusy ? TEXT("Working...") : TEXT("Generate");
+		const TSharedRef<FSlateFontMeasure> Measure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+		const FVector2f TextSize = Measure->Measure(Label, Font);
+		const FLinearColor TextColor = FMath::Lerp(Right, FLinearColor::White, 0.45f);
+		FSlateDrawElement::MakeText(OutDrawElements, LayerId + 2,
+			AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(40.0f, (Size.Y - TextSize.Y) * 0.5f))),
+			Label, Font, ESlateDrawEffect::None, TextColor.CopyWithNewOpacity(Fade));
+		return LayerId + 2;
+	}
+
+	virtual FReply OnMouseButtonDown(const FGeometry&, const FPointerEvent& InEvent) override
+	{
+		return InEvent.GetEffectingButton() == EKeys::LeftMouseButton ? FReply::Handled().CaptureMouse(AsShared()) : FReply::Unhandled();
+	}
+
+	virtual FReply OnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InEvent) override
+	{
+		if (InEvent.GetEffectingButton() != EKeys::LeftMouseButton || !HasMouseCapture())
+		{
+			return FReply::Unhandled();
+		}
+		FReply Reply = FReply::Handled().ReleaseMouseCapture();
+		if (InGeometry.IsUnderLocation(InEvent.GetScreenSpacePosition()) && OnClicked.IsBound())
+		{
+			Reply = OnClicked.Execute().ReleaseMouseCapture();
+		}
+		return Reply;
+	}
+
+private:
+	static constexpr float Width = 124.0f;
+	static constexpr float Height = 30.0f;
+
+	static FLinearColor ShiftHue(const FLinearColor& InColor, float InDegrees)
+	{
+		FLinearColor Hsv = InColor.LinearRGBToHSV();
+		Hsv.R = FMath::Fmod(Hsv.R + InDegrees + 360.0f, 360.0f);
+		Hsv.G = FMath::Max(Hsv.G, 0.65f);
+		Hsv.B = 1.0f;
+		return Hsv.HSVToLinearRGB();
+	}
+
+	static void DrawSparkle(FSlateWindowElementList& OutDrawElements, int32 InLayer, const FGeometry& InGeometry, const FVector2f& InCenter, float InRadius, const FLinearColor& InColor)
+	{
+		for (int32 Step = 0; Step < 4; ++Step)
+		{
+			const float Outer = InRadius * (1.0f - 0.22f * Step);
+			const float Inner = Outer * 0.30f;
+			TArray<FVector2f> Points;
+			Points.Add(InCenter + FVector2f(0.0f, -Outer));
+			Points.Add(InCenter + FVector2f(Inner, -Inner));
+			Points.Add(InCenter + FVector2f(Outer, 0.0f));
+			Points.Add(InCenter + FVector2f(Inner, Inner));
+			Points.Add(InCenter + FVector2f(0.0f, Outer));
+			Points.Add(InCenter + FVector2f(-Inner, Inner));
+			Points.Add(InCenter + FVector2f(-Outer, 0.0f));
+			Points.Add(InCenter + FVector2f(-Inner, -Inner));
+			Points.Add(InCenter + FVector2f(0.0f, -Outer));
+			FSlateDrawElement::MakeLines(OutDrawElements, InLayer, InGeometry.ToPaintGeometry(), Points, ESlateDrawEffect::None, InColor, true, 1.6f);
+		}
+	}
+
+	TAttribute<bool> IsBusy;
+	FOnClicked OnClicked;
+};
+
 // ------------------------------------------------------------------------- file history window
 
 class SLoreFileHistory : public SCompoundWidget
@@ -1388,7 +1601,9 @@ public:
 
 	void Construct(const FArguments& InArgs)
 	{
-		Language = LoadAiSetting(TEXT("Language"), TEXT("en"));
+		Language = LoadAiSetting(TEXT("Language"), TEXT("English"));
+		if (Language == TEXT("nl")) { Language = TEXT("Nederlands"); }
+		else if (Language == TEXT("en")) { Language = TEXT("English"); }
 		LoadTheme();
 
 		ChildSlot
@@ -1406,7 +1621,7 @@ public:
 				+ SHorizontalBox::Slot().FillWidth(1.0f)[ SNew(SSpacer) ]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 4.0f)
 				[
-					SNew(SBorder).BorderImage(&PillBrush).Padding(FMargin(10.0f, 4.0f))
+					SNew(SBorder).BorderImage(&PillBrush).Padding(FMargin(12.0f, 7.0f))
 					[
 						SNew(SHorizontalBox)
 						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 6.0f, 0.0f)
@@ -1569,6 +1784,17 @@ private:
 		BehindCount = FMath::Max(0, RemoteRevision - LocalRevision);
 		Server.LocalRevision = LocalRevision;
 		Server.RemoteRevision = RemoteRevision;
+
+		TArray<FString> KnownAuthors;
+		for (const TSharedPtr<FLoreRevisionItem>& Revision : Revisions)
+		{
+			KnownAuthors.AddUnique(Revision->Author);
+		}
+		for (const TSharedPtr<FLoreLockInfo>& Lock : Locks)
+		{
+			KnownAuthors.AddUnique(Lock->Owner);
+		}
+		EnsureOwnAvatarColor(KnownAuthors);
 
 		BranchBlock->SetText(FText::FromString(GetBranchName(Context)));
 		ApplyFilter();
@@ -1733,7 +1959,7 @@ private:
 		const TSharedRef<SVerticalBox> Content = SNew(SVerticalBox);
 
 		// Header line: avatar, author, description (collapsed) or author only (expanded).
-		Content->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 8.0f, 4.0f)
+		Content->AddSlot().AutoHeight().Padding(0.0f, 7.0f, 8.0f, 7.0f)
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)[ MakeAvatar(Item->Author) ]
@@ -1883,7 +2109,7 @@ private:
 		{
 			Card->AddSlot().AutoHeight()
 			[
-				SNew(SBorder).BorderImage(&StripeB).Padding(FMargin(10.0f, 4.0f))
+				SNew(SBorder).BorderImage(&StripeB).Padding(FMargin(12.0f, 7.0f))
 				[
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().FillWidth(1.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColAsset", "Asset")) ]
@@ -1903,7 +2129,7 @@ private:
 			[
 				SAssignNew(RowBorder, SBorder)
 				.BorderImage_Lambda([bOdd]() { return bOdd ? &StripeB : &StripeA; })
-				.Padding(FMargin(10.0f, 4.0f))
+				.Padding(FMargin(12.0f, 7.0f))
 				.ToolTipText(FText::Format(LOCTEXT("AssetTip", "{0}\n{1}"), Kind.Label, FText::FromString(File->Path)))
 				.OnMouseButtonUp(this, &SLoreHistoryPanel::OnFileRowMouseUp, Item, File)
 				[
@@ -1918,7 +2144,7 @@ private:
 			];
 		}
 
-		return SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(14.0f, 10.0f))[ Card ];
+		return SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(20.0f, 16.0f))[ Card ];
 	}
 
 	FReply OnFileRowMouseUp(const FGeometry&, const FPointerEvent& InMouseEvent, TSharedPtr<FLoreRevisionItem> Item, TSharedPtr<FLoreFileChange> File)
@@ -2016,11 +2242,11 @@ private:
 	TSharedRef<SWidget> BuildChangesTab()
 	{
 		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 10.0f, 12.0f, 4.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16.0f, 14.0f, 16.0f, 6.0f)
 			[
-				SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont")).Text(LOCTEXT("DescriptionLabel", "Changelist Description"))
+				MakeCardTitle(LOCTEXT("DescriptionLabel", "Changelist Description"))
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16.0f, 0.0f)
 			[
 				SNew(SBox).MinDesiredHeight(110.0f)
 				[
@@ -2028,30 +2254,24 @@ private:
 					+ SOverlay::Slot()
 					[
 						SAssignNew(DescriptionBox, SMultiLineEditableTextBox)
-						.HintText(LOCTEXT("DescriptionHint", "Describe your changes, or click the AI chip to write it for you."))
+						.HintText(LOCTEXT("DescriptionHint", "Describe your changes, or click Generate to let the AI write it."))
 						.AutoWrapText(true)
 					]
-					+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Bottom).Padding(0.0f, 0.0f, 8.0f, 6.0f)
+					+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Bottom).Padding(0.0f, 0.0f, 10.0f, 10.0f)
 					[
-						SNew(SButton).ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("SimpleButton"))
-							.ToolTipText(LOCTEXT("GenerateTip", "Write the description with Gemini, from the names of the selected files"))
-							.OnClicked(this, &SLoreHistoryPanel::OnGenerate)
-						[
-							SNew(SBorder).BorderImage(&AccentPillBrush).Padding(FMargin(8.0f, 2.0f))
-							[
-								SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont"))
-									.Text_Lambda([this]() { return bGenerating ? LOCTEXT("AiBusy", "AI ...") : LOCTEXT("AiChip", "AI"); })
-							]
-						]
+							SNew(SLoreAiButton)
+								.IsBusy_Lambda([this]() { return bGenerating; })
+								.ToolTipText(LOCTEXT("GenerateTip", "Write the description with Gemini, from the names of the selected files"))
+								.OnClicked(this, &SLoreHistoryPanel::OnGenerate)
 					]
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 4.0f, 12.0f, 0.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16.0f, 6.0f, 16.0f, 0.0f)
 			[
 				SAssignNew(GenerateStatus, STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground())
 			]
 			// Validation bar, like UEFN's Confirm Submit.
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f, 12.0f, 0.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16.0f, 12.0f, 16.0f, 0.0f)
 			[
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight()
@@ -2075,7 +2295,7 @@ private:
 					]
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f, 12.0f, 2.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16.0f, 12.0f, 16.0f, 4.0f)
 			[
 				SNew(SBorder).BorderImage(&StripeB).Padding(FMargin(8.0f, 4.0f))
 				[
@@ -2099,14 +2319,14 @@ private:
 					+ SHorizontalBox::Slot().AutoWidth()[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColState", "State")) ]
 				]
 			]
-			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(12.0f, 0.0f)
+			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(16.0f, 0.0f)
 			[
 				SAssignNew(ChangeList, SListView<TSharedPtr<FLoreLocalChange>>)
 				.ListItemsSource(&Changes)
 				.OnGenerateRow(this, &SLoreHistoryPanel::GenerateChangeRow)
 				.SelectionMode(ESelectionMode::None)
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 8.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16.0f, 12.0f)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -2129,24 +2349,6 @@ private:
 						SNew(STextBlock).Text(LOCTEXT("Submit", "Submit"))
 					]
 				]
-			];
-	}
-
-	TSharedRef<SWidget> MakeLanguageRadio(const FString& InCode, const FText& InLabel)
-	{
-		return SNew(SCheckBox)
-			.Style(&FAppStyle::Get().GetWidgetStyle<FCheckBoxStyle>("RadioButton"))
-			.IsChecked_Lambda([this, InCode]() { return Language == InCode ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-			.OnCheckStateChanged_Lambda([this, InCode](ECheckBoxState InState)
-			{
-				if (InState == ECheckBoxState::Checked)
-				{
-					Language = InCode;
-					SaveAiSetting(TEXT("Language"), InCode);
-				}
-			})
-			[
-				SNew(STextBlock).Text(InLabel)
 			];
 	}
 
@@ -2174,7 +2376,7 @@ private:
 		return SNew(STableRow<TSharedPtr<FLoreLocalChange>>, OwnerTable)
 			.Padding(FMargin(0.0f, 1.0f))
 			[
-				SNew(SBorder).BorderImage(&StripeA).Padding(FMargin(8.0f, 5.0f))
+				SNew(SBorder).BorderImage(&StripeA).Padding(FMargin(10.0f, 8.0f))
 				.ToolTipText(FText::Format(LOCTEXT("AssetTip", "{0}\n{1}"), Kind.Label, FText::FromString(Change->Path)))
 				[
 					SNew(SHorizontalBox)
@@ -2240,6 +2442,12 @@ private:
 		return FReply::Handled();
 	}
 
+	/** Flash models to try, in order. Replaced by the models the API key can actually use once they are listed. */
+	static TArray<FString> DefaultGeminiModels()
+	{
+		return { TEXT("gemini-3.5-flash-lite"), TEXT("gemini-3.5-flash"), TEXT("gemini-2.5-flash-lite"), TEXT("gemini-2.5-flash") };
+	}
+
 	FReply OnGenerate()
 	{
 		if (bGenerating)
@@ -2253,7 +2461,7 @@ private:
 			return FReply::Handled();
 		}
 		SaveAiSetting(TEXT("GeminiApiKey"), Key);
-		const FString Model = ModelBox->GetText().ToString().TrimStartAndEnd().IsEmpty() ? FString(DefaultGeminiModel) : ModelBox->GetText().ToString().TrimStartAndEnd();
+		GeminiKey = Key;
 
 		FString UserText = TEXT("Changed files (A = added, M = modified, D = deleted):\n");
 		int32 Listed = 0;
@@ -2279,9 +2487,15 @@ private:
 			}
 		}
 
-		const FString LanguageRule = Language == TEXT("nl")
-			? TEXT("Write in Dutch. Use the past participle, e.g. 'toegevoegd', 'aangepast', 'bijgewerkt', 'verwijderd', so each line reads as 'X toegevoegd'.")
-			: TEXT("Write in English. Use the past tense, e.g. 'Added', 'Updated', 'Removed', 'Fixed'.");
+		FString Wanted = LanguageBox.IsValid() ? LanguageBox->GetText().ToString().TrimStartAndEnd() : Language;
+		if (Wanted.IsEmpty())
+		{
+			Wanted = TEXT("English");
+		}
+		Language = Wanted;
+		SaveAiSetting(TEXT("Language"), Language);
+
+		const FString LanguageRule = FString::Printf(TEXT("Write in %s. Use the past tense (or the past participle), for example 'Added', 'Updated', 'Removed', 'Fixed' in English, so each line reads as something that was done."), *Language);
 		const FString SystemText = TEXT("You write version control descriptions for an Unreal Engine game project. The description is a record of what was done in this version, never an instruction or a to-do: describe changes that have been made, not changes to make (so 'Added X', never 'Add X'). Reply with one short summary line (maximum 72 characters) and, only if useful, up to three short lines starting with '- '. Use only what the file paths and change types show; do not invent details. Plain text only: no markdown, no quotes, no preamble. ") + LanguageRule;
 
 		const auto MakeTextParts = [](const FString& InText)
@@ -2310,31 +2524,156 @@ private:
 		Body->SetArrayField(TEXT("contents"), Contents);
 		Body->SetObjectField(TEXT("generationConfig"), GenerationConfig);
 
-		FString BodyText;
-		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&BodyText);
+		GeminiBody.Reset();
+		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&GeminiBody);
 		FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
 
+		bGenerating = true;
+		GenerateStatus->SetText(LOCTEXT("Generating", "Generating..."));
+		UE_LOG(LogLoreSourceControl, Log, TEXT("LoreHistory: asking Gemini to describe %d file(s)"), Listed);
+		if (GeminiModels.IsEmpty())
+		{
+			ListGeminiModels();
+		}
+		else
+		{
+			TryGeminiModel(0);
+		}
+		return FReply::Handled();
+	}
+
+	/** Ask which models this key can use, so the flash models to try (and fall back to) are the real ones. */
+	void ListGeminiModels()
+	{
+		const TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+		Request->SetURL(TEXT("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200"));
+		Request->SetVerb(TEXT("GET"));
+		Request->SetHeader(TEXT("x-goog-api-key"), GeminiKey);
+		Request->SetTimeout(15.0f);
+		Request->OnProcessRequestComplete().BindSP(this, &SLoreHistoryPanel::OnGeminiModelsListed);
+		Request->ProcessRequest();
+	}
+
+	void OnGeminiModelsListed(FHttpRequestPtr, FHttpResponsePtr InResponse, bool bSucceeded)
+	{
+		struct FCandidate { FString Name; TArray<int32> Version; bool bLite = false; bool bPreview = false; };
+		TArray<FCandidate> Candidates;
+
+		TSharedPtr<FJsonObject> Json;
+		if (bSucceeded && InResponse.IsValid() && InResponse->GetResponseCode() == 200
+			&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(InResponse->GetContentAsString()), Json) && Json.IsValid())
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Models = nullptr;
+			if (Json->TryGetArrayField(TEXT("models"), Models))
+			{
+				for (const TSharedPtr<FJsonValue>& Value : *Models)
+				{
+					const TSharedPtr<FJsonObject> Model = Value->AsObject();
+					FString Name;
+					if (!Model.IsValid() || !Model->TryGetStringField(TEXT("name"), Name))
+					{
+						continue;
+					}
+					Name.RemoveFromStart(TEXT("models/"));
+					const FString Lower = Name.ToLower();
+					if (!Lower.StartsWith(TEXT("gemini-")) || !Lower.Contains(TEXT("flash")))
+					{
+						continue;
+					}
+					static const TCHAR* const Excluded[] = { TEXT("image"), TEXT("tts"), TEXT("live"), TEXT("audio"), TEXT("embed"), TEXT("robot"), TEXT("computer"), TEXT("native"), TEXT("8b") };
+					bool bSkip = false;
+					for (const TCHAR* Word : Excluded)
+					{
+						bSkip |= Lower.Contains(Word);
+					}
+					const TArray<TSharedPtr<FJsonValue>>* Methods = nullptr;
+					bool bCanGenerate = false;
+					if (Model->TryGetArrayField(TEXT("supportedGenerationMethods"), Methods))
+					{
+						for (const TSharedPtr<FJsonValue>& Method : *Methods)
+						{
+							bCanGenerate |= Method->AsString() == TEXT("generateContent");
+						}
+					}
+					if (bSkip || !bCanGenerate)
+					{
+						continue;
+					}
+					FCandidate Candidate;
+					Candidate.Name = Name;
+					Candidate.Version = ParseVersionNumbers(Name);
+					Candidate.bLite = Lower.Contains(TEXT("lite"));
+					Candidate.bPreview = Lower.Contains(TEXT("preview")) || Lower.Contains(TEXT("exp"));
+					Candidates.Add(Candidate);
+				}
+			}
+		}
+
+		// Newest stable version first, the lighter model before the full one (it has the higher free limits).
+		Candidates.Sort([](const FCandidate& A, const FCandidate& B)
+		{
+			if (A.bPreview != B.bPreview) { return !A.bPreview; }
+			const int32 Compare = CompareVersions(A.Name, B.Name);
+			if (Compare != 0) { return Compare > 0; }
+			return A.bLite && !B.bLite;
+		});
+
+		GeminiModels.Reset();
+		for (const FCandidate& Candidate : Candidates)
+		{
+			if (GeminiModels.Num() < 6)
+			{
+				GeminiModels.Add(Candidate.Name);
+			}
+		}
+		if (GeminiModels.IsEmpty())
+		{
+			GeminiModels = DefaultGeminiModels();
+		}
+		TryGeminiModel(0);
+	}
+
+	void TryGeminiModel(int32 InIndex)
+	{
+		GeminiModelIndex = InIndex;
+		const FString& Model = GeminiModels[InIndex];
 		const TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
 		Request->SetURL(FString::Printf(TEXT("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"), *Model));
 		Request->SetVerb(TEXT("POST"));
 		Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-		Request->SetHeader(TEXT("x-goog-api-key"), Key);
-		Request->SetContentAsString(BodyText);
+		Request->SetHeader(TEXT("x-goog-api-key"), GeminiKey);
+		Request->SetContentAsString(GeminiBody);
+		Request->SetTimeout(60.0f);
 		Request->OnProcessRequestComplete().BindSP(this, &SLoreHistoryPanel::OnGenerated);
-
-		bGenerating = true;
-		GenerateStatus->SetText(LOCTEXT("Generating", "Generating..."));
-		UE_LOG(LogLoreSourceControl, Log, TEXT("LoreHistory: asking Gemini (%s) to describe %d file(s)"), *Model, Listed);
 		Request->ProcessRequest();
-		return FReply::Handled();
 	}
 
 	void OnGenerated(FHttpRequestPtr, FHttpResponsePtr InResponse, bool bSucceeded)
 	{
+		const FString UsedModel = GeminiModels.IsValidIndex(GeminiModelIndex) ? GeminiModels[GeminiModelIndex] : FString();
+
+		// Limit reached or model unavailable: quietly move on to the next flash model.
+		if (bSucceeded && InResponse.IsValid())
+		{
+			const int32 Code = InResponse->GetResponseCode();
+			if ((Code == 429 || Code == 503 || Code == 500 || Code == 404) && GeminiModels.IsValidIndex(GeminiModelIndex + 1))
+			{
+				UE_LOG(LogLoreSourceControl, Log, TEXT("LoreHistory: Gemini model %s answered HTTP %d, trying %s"), *UsedModel, Code, *GeminiModels[GeminiModelIndex + 1]);
+				GenerateStatus->SetText(FText::Format(LOCTEXT("GenerateFallback", "{0} is not available right now (limit reached). Trying {1}..."), FText::FromString(UsedModel), FText::FromString(GeminiModels[GeminiModelIndex + 1])));
+				TryGeminiModel(GeminiModelIndex + 1);
+				return;
+			}
+		}
+
 		bGenerating = false;
 		if (!bSucceeded || !InResponse.IsValid())
 		{
 			GenerateStatus->SetText(LOCTEXT("GenerateNoConnection", "Could not reach Gemini. Check your internet connection."));
+			return;
+		}
+		if (InResponse->GetResponseCode() == 429)
+		{
+			GenerateStatus->SetText(LOCTEXT("GenerateAllLimited", "The Gemini limit is reached for all flash models. Try again later (the daily limit resets at 09:00 Dutch time) or write the description yourself."));
 			return;
 		}
 
@@ -2387,7 +2726,7 @@ private:
 			return;
 		}
 		DescriptionBox->SetText(FText::FromString(Generated));
-		GenerateStatus->SetText(LOCTEXT("GenerateDone", "Generated. Edit it if you like, then Submit."));
+		GenerateStatus->SetText(FText::Format(LOCTEXT("GenerateDone", "Written by {0}. Edit it if you like, then Submit."), FText::FromString(UsedModel)));
 	}
 
 	// ----- locks tab
@@ -2395,7 +2734,7 @@ private:
 	TSharedRef<SWidget> BuildLocksTab()
 	{
 		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 10.0f, 12.0f, 8.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16.0f, 14.0f, 16.0f, 10.0f)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
@@ -2408,7 +2747,7 @@ private:
 					SNew(SButton).Text(LOCTEXT("UnlockAllMine", "Unlock all mine")).OnClicked(this, &SLoreHistoryPanel::OnUnlockAllMine)
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(12.0f, 0.0f, 12.0f, 2.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16.0f, 0.0f, 16.0f, 4.0f)
 			[
 				SNew(SBorder).BorderImage(&StripeB).Padding(FMargin(8.0f, 4.0f))
 				[
@@ -2417,7 +2756,7 @@ private:
 					+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 90.0f, 0.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(LOCTEXT("ColCheckedOutBy", "Checked out by")) ]
 				]
 			]
-			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(12.0f, 0.0f)
+			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(16.0f, 0.0f)
 			[
 				SAssignNew(LockList, SListView<TSharedPtr<FLoreLockInfo>>)
 				.ListItemsSource(&Locks)
@@ -2441,7 +2780,7 @@ private:
 		return SNew(STableRow<TSharedPtr<FLoreLockInfo>>, OwnerTable)
 			.Padding(FMargin(0.0f, 1.0f))
 			[
-				SNew(SBorder).BorderImage(&StripeA).Padding(FMargin(8.0f, 5.0f))
+				SNew(SBorder).BorderImage(&StripeA).Padding(FMargin(10.0f, 8.0f))
 				.ToolTipText(FText::Format(LOCTEXT("AssetTip", "{0}\n{1}"), Kind.Label, FText::FromString(Lock->Path)))
 				[
 					SNew(SHorizontalBox)
@@ -2518,11 +2857,11 @@ private:
 	TSharedRef<SWidget> MakeInfoRow(const FText& InLabel, TFunction<FText()> InValue)
 	{
 		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 3.0f, 12.0f, 3.0f)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 6.0f, 16.0f, 6.0f)
 			[
 				SNew(SBox).WidthOverride(130.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(InLabel) ]
 			]
-			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 3.0f)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 6.0f)
 			[
 				SNew(STextBlock).AutoWrapText(true).Text_Lambda([InValue]() { return InValue(); })
 			];
@@ -2530,10 +2869,10 @@ private:
 
 	TSharedRef<SWidget> MakeInfoCard(const FText& InTitle, const TSharedRef<SWidget>& InBody)
 	{
-		return SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(14.0f, 10.0f))
+		return SNew(SBorder).BorderImage(&CardBrush).Padding(FMargin(20.0f, 16.0f))
 			[
 				SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)[ MakeCardTitle(InTitle) ]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 12.0f)[ MakeCardTitle(InTitle) ]
 				+ SVerticalBox::Slot().AutoHeight()[ InBody ]
 			];
 	}
@@ -2543,7 +2882,7 @@ private:
 		const auto Str = [](const FString& InValue) { return InValue.IsEmpty() ? FText::FromString(TEXT("-")) : FText::FromString(InValue); };
 
 		return SNew(SScrollBox)
-			+ SScrollBox::Slot().Padding(12.0f, 10.0f, 12.0f, 4.0f)
+			+ SScrollBox::Slot().Padding(16.0f, 16.0f, 16.0f, 8.0f)
 			[
 				MakeInfoCard(LOCTEXT("CardConnection", "Connection"),
 					SNew(SVerticalBox)
@@ -2566,7 +2905,7 @@ private:
 					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowUrl", "Server"), [this, Str]() { return Str(Server.RemoteUrl); }) ]
 					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowChecked", "Last checked"), [this, Str]() { return Str(Server.LastChecked); }) ])
 			]
-			+ SScrollBox::Slot().Padding(12.0f, 4.0f)
+			+ SScrollBox::Slot().Padding(16.0f, 8.0f)
 			[
 				MakeInfoCard(LOCTEXT("CardRepository", "Repository"),
 					SNew(SVerticalBox)
@@ -2577,7 +2916,7 @@ private:
 					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowCreated", "Created"), [this, Str]() { return Str(Server.Created); }) ]
 					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowRevisions", "Revisions"), [this]() { return FText::Format(LOCTEXT("RevisionsValue", "Local {0}  |  Server {1}"), FText::AsNumber(Server.LocalRevision), FText::AsNumber(Server.RemoteRevision)); }) ])
 			]
-			+ SScrollBox::Slot().Padding(12.0f, 4.0f)
+			+ SScrollBox::Slot().Padding(16.0f, 8.0f)
 			[
 				MakeInfoCard(LOCTEXT("CardAccount", "Account"),
 					SNew(SVerticalBox)
@@ -2585,45 +2924,39 @@ private:
 					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowExpires", "Login valid until"), [this, Str]() { return Str(Server.TokenExpires); }) ]
 					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowClient", "Lore client"), [this, Str]() { return Str(Server.ClientVersion); }) ])
 			]
-			+ SScrollBox::Slot().Padding(12.0f, 4.0f)
+			+ SScrollBox::Slot().Padding(16.0f, 8.0f)
 			[
 				MakeInfoCard(LOCTEXT("CardUpdates", "Updates"),
 					SNew(SVerticalBox)
 					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowLoreClient", "Lore client"), [this]() { return LoreRelease.Status; }) ]
 					+ SVerticalBox::Slot().AutoHeight()[ MakeInfoRow(LOCTEXT("RowPluginVersion", "This plugin"), [this]() { return PluginRelease.Status; }) ]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 16.0f, 0.0f, 0.0f)
 					[
 						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 12.0f, 0.0f)
 						[
-							SNew(SButton).Text(LOCTEXT("CheckUpdates", "Check for updates")).OnClicked(this, &SLoreHistoryPanel::OnCheckUpdates)
+							SNew(SButton).Text(LOCTEXT("CheckUpdates", "Check for updates")).ContentPadding(FMargin(16.0f, 6.0f)).OnClicked(this, &SLoreHistoryPanel::OnCheckUpdates)
 						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 12.0f, 0.0f)
 						[
-							SNew(SButton).Text(LOCTEXT("OpenLoreRelease", "Open Lore download page"))
+							SNew(SButton).Text(LOCTEXT("OpenLoreRelease", "Open Lore download page")).ContentPadding(FMargin(16.0f, 6.0f))
 								.IsEnabled_Lambda([this]() { return LoreRelease.bUpdateAvailable && !LoreRelease.Url.IsEmpty(); })
 								.OnClicked_Lambda([this]() { FPlatformProcess::LaunchURL(*LoreRelease.Url, nullptr, nullptr); return FReply::Handled(); })
 						]
 						+ SHorizontalBox::Slot().AutoWidth()
 						[
-							SNew(SButton).Text(LOCTEXT("OpenPluginRelease", "Open plugin page"))
+							SNew(SButton).Text(LOCTEXT("OpenPluginRelease", "Open plugin page")).ContentPadding(FMargin(16.0f, 6.0f))
 								.IsEnabled_Lambda([this]() { return !PluginRelease.Url.IsEmpty(); })
 								.OnClicked_Lambda([this]() { FPlatformProcess::LaunchURL(*PluginRelease.Url, nullptr, nullptr); return FReply::Handled(); })
 						]
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 16.0f, 0.0f, 0.0f)
 					[
 						SNew(STextBlock).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())
-							.Text(LOCTEXT("UpdatesNote", "Checked on GitHub: the Lore client against EpicGames/lore, the plugin against the original LoreSourceControl plugin. The Lore server and the client need to be the same version, so update the server container too."))
+							.Text(LOCTEXT("UpdatesNote", "The Lore client is checked against EpicGames/lore and this plugin against its own GitHub repository. The Lore server and the client need to be the same version, so update the server container too."))
 					])
 			]
-			+ SScrollBox::Slot().Padding(12.0f, 4.0f, 12.0f, 12.0f)
-			[
-				MakeInfoCard(LOCTEXT("CardLocks", "About locks"),
-					SNew(STextBlock).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())
-						.Text(LOCTEXT("LocksNote", "The Lore server keeps locks in memory, so they are lost when the server restarts. This plugin remembers your own locks and takes them back for files you are still editing."))
-				)
-			];
+			;
 	}
 
 	// ----- updates
@@ -2641,14 +2974,16 @@ private:
 		PluginRelease = FReleaseInfo();
 		LoreRelease.Status = LOCTEXT("UpdateChecking", "Checking...");
 		PluginRelease.Status = LOCTEXT("UpdateChecking", "Checking...");
-		StartReleaseCheck(TEXT("EpicGames/lore"), true);
-		StartReleaseCheck(TEXT("ScottRaffertyCG/lore-ue"), false);
+		PluginRelease.Url = PluginRepositoryUrl;
+		StartReleaseCheck(TEXT("https://api.github.com/repos/EpicGames/lore/releases/latest"), true);
+		// This plugin's own version is read from the .uplugin file on the main branch of its repository.
+		StartReleaseCheck(TEXT("https://raw.githubusercontent.com/epicaleric/lore-source-control-ue/main/LoreSourceControl.uplugin"), false);
 	}
 
-	void StartReleaseCheck(const FString& InRepository, bool bInLoreClient)
+	void StartReleaseCheck(const FString& InUrl, bool bInLoreClient)
 	{
 		const TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-		Request->SetURL(FString::Printf(TEXT("https://api.github.com/repos/%s/releases/latest"), *InRepository));
+		Request->SetURL(InUrl);
 		Request->SetVerb(TEXT("GET"));
 		Request->SetHeader(TEXT("Accept"), TEXT("application/vnd.github+json"));
 		Request->SetHeader(TEXT("User-Agent"), TEXT("LoreSourceControl-UE"));
@@ -2661,6 +2996,7 @@ private:
 	{
 		FReleaseInfo& Info = bInLoreClient ? LoreRelease : PluginRelease;
 		Info = FReleaseInfo();
+		Info.Url = bInLoreClient ? FString() : PluginRepositoryUrl;
 
 		TSharedPtr<FJsonObject> Json;
 		if (!bSucceeded || !InResponse.IsValid() || InResponse->GetResponseCode() != 200
@@ -2669,8 +3005,15 @@ private:
 			Info.Status = LOCTEXT("UpdateUnknown", "Could not check (no connection or GitHub did not answer).");
 			return;
 		}
-		Json->TryGetStringField(TEXT("tag_name"), Info.Latest);
-		Json->TryGetStringField(TEXT("html_url"), Info.Url);
+		if (bInLoreClient)
+		{
+			Json->TryGetStringField(TEXT("tag_name"), Info.Latest);
+			Json->TryGetStringField(TEXT("html_url"), Info.Url);
+		}
+		else
+		{
+			Json->TryGetStringField(TEXT("VersionName"), Info.Latest);
+		}
 
 		FString Installed;
 		if (bInLoreClient)
@@ -2695,20 +3038,26 @@ private:
 		}
 		else
 		{
-			Info.Status = FText::Format(LOCTEXT("NewerThanRelease", "{0}, newer than the latest release ({1})"), InstalledText, LatestText);
+			Info.Status = FText::Format(LOCTEXT("NewerThanRelease", "{0}, newer than the published version ({1})"), InstalledText, LatestText);
 		}
 	}
 
 	// ----- settings tab
 
+	static FString NormalizeColorValue(const FString& InValue)
+	{
+		FColor Parsed;
+		return ParseColorValue(InValue, Parsed) ? Parsed.ToHex().Left(6).ToUpper() : FString();
+	}
+
 	TSharedRef<SWidget> MakeSwatch(const FThemeColor& InColor, TFunction<FString()> InCurrent, TFunction<void(const FString&)> InPick)
 	{
-		const FString Id = InColor.Id;
+		const FString Hex = InColor.Srgb.ToHex().Left(6).ToUpper();
 		const FLinearColor Tint = FLinearColor::FromSRGBColor(InColor.Srgb);
 		return SNew(SButton).ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("SimpleButton"))
-			.ContentPadding(FMargin(2.0f))
+			.ContentPadding(FMargin(3.0f))
 			.ToolTipText(InColor.Label)
-			.OnClicked_Lambda([Id, InPick]() { InPick(Id); return FReply::Handled(); })
+			.OnClicked_Lambda([Hex, InPick]() { InPick(Hex); return FReply::Handled(); })
 			[
 				SNew(SBox).WidthOverride(28.0f).HeightOverride(28.0f)
 				[
@@ -2716,7 +3065,7 @@ private:
 					+ SOverlay::Slot()
 					[
 						SNew(SBorder).BorderImage(&SwatchRingBrush).Padding(0.0f)
-							.BorderBackgroundColor_Lambda([Id, InCurrent]() { return InCurrent() == Id ? FSlateColor(FLinearColor::White) : FSlateColor(FLinearColor::Transparent); })
+							.BorderBackgroundColor_Lambda([Hex, InCurrent]() { return NormalizeColorValue(InCurrent()) == Hex ? FSlateColor(FLinearColor::White) : FSlateColor(FLinearColor::Transparent); })
 					]
 					+ SOverlay::Slot().Padding(3.0f)
 					[
@@ -2726,32 +3075,56 @@ private:
 			];
 	}
 
-	TSharedRef<SWidget> MakeSwatchRow(TFunction<FString()> InCurrent, TFunction<void(const FString&)> InPick, bool bInAllowAuto)
+	/** Opens the editor's colour picker so any colour can be chosen. */
+	TSharedRef<SWidget> MakeCustomColorButton(TFunction<FString()> InCurrent, TFunction<void(const FString&)> InPick)
+	{
+		return SNew(SButton)
+			.ContentPadding(FMargin(12.0f, 5.0f))
+			.ToolTipText(LOCTEXT("PickColorTip", "Choose any colour"))
+			.OnClicked_Lambda([InCurrent, InPick]()
+			{
+				FColorPickerArgs Args(ColorFromValue(InCurrent(), Accent), FOnLinearColorValueChanged::CreateLambda([InPick](FLinearColor InColor) { InPick(ColorToValue(InColor)); }));
+				Args.bOnlyRefreshOnMouseUp = true;
+				Args.bUseAlpha = false;
+				OpenColorPicker(Args);
+				return FReply::Handled();
+			})
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+				[
+					SNew(SBox).WidthOverride(16.0f).HeightOverride(16.0f)
+					[
+						SNew(SBorder).BorderImage(&SwatchBrush).Padding(0.0f)
+							.BorderBackgroundColor_Lambda([InCurrent]() { return FSlateColor(ColorFromValue(InCurrent(), Accent)); })
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(STextBlock).Text(LOCTEXT("CustomColor", "Choose colour..."))
+				]
+			];
+	}
+
+	TSharedRef<SWidget> MakeColorChooser(TFunction<FString()> InCurrent, TFunction<void(const FString&)> InPick)
 	{
 		const TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
-		if (bInAllowAuto)
-		{
-			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
-			[
-				SNew(SButton).Text(LOCTEXT("ColorAuto", "Auto")).ToolTipText(LOCTEXT("ColorAutoTip", "A colour picked from your name"))
-					.OnClicked_Lambda([InPick]() { InPick(FString()); return FReply::Handled(); })
-			];
-		}
 		for (const FThemeColor& Color : ThemeColors())
 		{
-			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 2.0f, 0.0f)[ MakeSwatch(Color, InCurrent, InPick) ];
+			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)[ MakeSwatch(Color, InCurrent, InPick) ];
 		}
+		Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)[ MakeCustomColorButton(InCurrent, InPick) ];
 		return Row;
 	}
 
 	TSharedRef<SWidget> MakeSettingRow(const FText& InLabel, const TSharedRef<SWidget>& InControl)
 	{
 		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 4.0f, 12.0f, 4.0f)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 8.0f, 16.0f, 8.0f)
 			[
-				SNew(SBox).WidthOverride(130.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(InLabel) ]
+				SNew(SBox).WidthOverride(150.0f)[ SNew(STextBlock).ColorAndOpacity(FSlateColor::UseSubduedForeground()).Text(InLabel) ]
 			]
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(0.0f, 4.0f)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(0.0f, 8.0f)
 			[
 				InControl
 			];
@@ -2760,10 +3133,6 @@ private:
 	TSharedRef<SWidget> BuildSettingsTab()
 	{
 		AccentId = LoadUiSetting(TEXT("Accent"), TEXT("teal"));
-		if (!FindThemeColor(AccentId))
-		{
-			AccentId = ThemeColors()[0].Id;
-		}
 
 		const auto Str = [](const FString& InValue) { return InValue.IsEmpty() ? FText::FromString(TEXT("-")) : FText::FromString(InValue); };
 
@@ -2771,45 +3140,44 @@ private:
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				MakeSettingRow(LOCTEXT("SettingAccent", "Accent colour"),
-					MakeSwatchRow(
+					MakeColorChooser(
 						[this]() { return AccentId; },
-						[this](const FString& InId)
+						[this](const FString& InValue)
 						{
-							AccentId = InId;
-							SaveUiSetting(TEXT("Accent"), InId);
-							ApplyAccent(InId);
+							AccentId = InValue;
+							SaveUiSetting(TEXT("Accent"), InValue);
+							ApplyAccent(InValue);
 							Invalidate(EInvalidateWidgetReason::Paint);
-						},
-						false))
+						}))
 			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				MakeSettingRow(LOCTEXT("SettingAvatar", "Your avatar colour"),
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 10.0f, 0.0f)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 14.0f, 0.0f)
 					[
-						SNew(SBox).WidthOverride(28.0f).HeightOverride(28.0f)
+						SNew(SBox).WidthOverride(30.0f).HeightOverride(30.0f)
 						[
 							SNew(SBorder).BorderImage(&AvatarBrush).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(0.0f)
 								.BorderBackgroundColor_Lambda([]() { return FSlateColor(AvatarColorFor(OwnUserName)); })
 							[
 								SNew(STextBlock).Font(FAppStyle::GetFontStyle("BoldFont"))
+									.ColorAndOpacity_Lambda([]() { return ContrastFor(AvatarColorFor(OwnUserName)); })
 									.Text_Lambda([]() { return FText::FromString(OwnUserName.IsEmpty() ? FString(TEXT("?")) : OwnUserName.Left(1).ToUpper()); })
 							]
 						]
 					]
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 					[
-						MakeSwatchRow(
+						MakeColorChooser(
 							[]() { return OwnAvatarColorId; },
-							[this](const FString& InId)
+							[this](const FString& InValue)
 							{
-								OwnAvatarColorId = InId;
-								SaveUiSetting(TEXT("AvatarColor"), InId);
+								OwnAvatarColorId = InValue;
+								SaveUiSetting(TEXT("AvatarColor"), InValue);
 								if (HistoryList.IsValid()) { HistoryList->RebuildList(); }
 								if (LockList.IsValid()) { LockList->RebuildList(); }
-							},
-							true)
+							})
 					])
 			];
 
@@ -2840,23 +3208,27 @@ private:
 					[
 						SNew(STextBlock).Text_Lambda([this, Str]() { return Str(Server.RemoteUrl); })
 					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(12.0f, 0.0f, 0.0f, 0.0f)
 					[
-						SNew(SButton).Text(LOCTEXT("CopyServer", "Copy"))
+						SNew(SButton).ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("SimpleButton"))
+							.ToolTipText(LOCTEXT("CopyServerTip", "Copy the server address"))
 							.OnClicked_Lambda([this]() { FPlatformApplicationMisc::ClipboardCopy(*Server.RemoteUrl); return FReply::Handled(); })
+						[
+							MakeIcon("Icons.Copy", FLinearColor::White, 16.0f)
+						]
 					])
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
 			[
 				SNew(STextBlock).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())
 					.Text(LOCTEXT("ServerAddressNote", "The server address is stored in the project's Lore working copy and Lore has no command to change it, so it can only be read here. To point the project at another server, clone the repository from that server."))
 			];
 
-		const TSharedRef<SWidget> GeminiBody = SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+		const TSharedRef<SWidget> GeminiCardBody = SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
 			[
 				SNew(STextBlock).AutoWrapText(true).ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					.Text(LOCTEXT("AiPrivacy", "The AI chip in the Changes tab sends only the file names and change types, plus the last few descriptions, to Google. On the free tier Google may use prompts to improve its products. The key is saved in this project's Saved/Config folder, not in the repository."))
+					.Text(LOCTEXT("AiPrivacy", "Generate in the Changes tab sends only the file names and change types, plus the last few descriptions, to Google. On the free tier Google may use prompts to improve its products. The key is saved in this project's Saved/Config folder, not in the repository. The newest Gemini flash model is used, and the plugin switches to the next flash model by itself when a limit is reached."))
 			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
@@ -2869,34 +3241,32 @@ private:
 			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				MakeSettingRow(LOCTEXT("SettingModel", "Model"),
-					SAssignNew(ModelBox, SEditableTextBox)
-						.HintText(LOCTEXT("ModelHint", "Model"))
-						.Text(FText::FromString(LoadAiSetting(TEXT("GeminiModel"), DefaultGeminiModel)))
-						.OnTextCommitted(this, &SLoreHistoryPanel::OnAiSettingCommitted, FString(TEXT("GeminiModel"))))
-			]
-			+ SVerticalBox::Slot().AutoHeight()
-			[
 				MakeSettingRow(LOCTEXT("LanguageLabel", "Description language"),
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 12.0f, 0.0f)[ MakeLanguageRadio(TEXT("nl"), LOCTEXT("LanguageDutch", "Nederlands")) ]
-					+ SHorizontalBox::Slot().AutoWidth()[ MakeLanguageRadio(TEXT("en"), LOCTEXT("LanguageEnglish", "English")) ])
+					SAssignNew(LanguageBox, SEditableTextBox)
+						.HintText(LOCTEXT("LanguageHint", "For example Nederlands, English, Deutsch, Francais"))
+						.Text(FText::FromString(Language))
+						.OnTextCommitted_Lambda([this](const FText& InText, ETextCommit::Type)
+						{
+							const FString Value = InText.ToString().TrimStartAndEnd();
+							Language = Value.IsEmpty() ? FString(TEXT("English")) : Value;
+							SaveAiSetting(TEXT("Language"), Language);
+						}))
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth()
 				[
-					SNew(SButton).Text(LOCTEXT("OpenAiStudio", "See my Gemini limits and usage"))
+					SNew(SButton).Text(LOCTEXT("OpenAiStudio", "See my Gemini limits and usage")).ContentPadding(FMargin(16.0f, 6.0f))
 						.ToolTipText(LOCTEXT("OpenAiStudioTip", "Opens Google AI Studio, where the free-tier limits and your usage are shown per project"))
 						.OnClicked_Lambda([]() { FPlatformProcess::LaunchURL(TEXT("https://aistudio.google.com/rate-limit"), nullptr, nullptr); return FReply::Handled(); })
 				]
 			];
 
 		return SNew(SScrollBox)
-			+ SScrollBox::Slot().Padding(12.0f, 10.0f, 12.0f, 4.0f)[ MakeInfoCard(LOCTEXT("CardAppearance", "Appearance"), AppearanceBody) ]
-			+ SScrollBox::Slot().Padding(12.0f, 4.0f)[ MakeInfoCard(LOCTEXT("CardIdentity", "Identity and server"), IdentityBody) ]
-			+ SScrollBox::Slot().Padding(12.0f, 4.0f, 12.0f, 12.0f)[ MakeInfoCard(LOCTEXT("CardGemini", "Gemini (AI descriptions)"), GeminiBody) ];
+			+ SScrollBox::Slot().Padding(16.0f, 16.0f, 16.0f, 8.0f)[ MakeInfoCard(LOCTEXT("CardAppearance", "Appearance"), AppearanceBody) ]
+			+ SScrollBox::Slot().Padding(16.0f, 8.0f)[ MakeInfoCard(LOCTEXT("CardIdentity", "Identity and server"), IdentityBody) ]
+			+ SScrollBox::Slot().Padding(16.0f, 8.0f, 16.0f, 24.0f)[ MakeInfoCard(LOCTEXT("CardGemini", "Gemini (AI descriptions)"), GeminiCardBody) ];
 	}
 
 	void ReloadServer()
@@ -2951,7 +3321,11 @@ private:
 	TSharedPtr<SMultiLineEditableTextBox> DescriptionBox;
 	TSharedPtr<STextBlock> GenerateStatus;
 	TSharedPtr<SEditableTextBox> ApiKeyBox;
-	TSharedPtr<SEditableTextBox> ModelBox;
+	TSharedPtr<SEditableTextBox> LanguageBox;
+	TArray<FString> GeminiModels;
+	int32 GeminiModelIndex = 0;
+	FString GeminiKey;
+	FString GeminiBody;
 
 	FServerInfo Server;
 	FReleaseInfo LoreRelease;
