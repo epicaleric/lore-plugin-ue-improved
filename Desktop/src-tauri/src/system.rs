@@ -528,3 +528,23 @@ pub fn set_aside_folder(path: String) -> Result<String, String> {
     std::fs::rename(dir, &target).map_err(|e| e.to_string())?;
     Ok(target.to_string_lossy().to_string())
 }
+
+/// Gives a working copy a clean `.lore` taken from a fresh clone of its (still empty) project. The old one is renamed, not deleted.
+#[tauri::command]
+pub fn relink_lore(folder: String, fresh: String) -> Result<String, String> {
+    let from = Path::new(&fresh).join(".lore");
+    if !from.exists() {
+        return Err("The fresh clone has no .lore folder.".into());
+    }
+    let to = Path::new(&folder).join(".lore");
+    let mut aside = String::new();
+    if to.exists() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let target = Path::new(&folder).join(format!(".lore.old-{stamp}"));
+        std::fs::rename(&to, &target).map_err(|e| e.to_string())?;
+        aside = target.to_string_lossy().to_string();
+    }
+    copy_dir(&from, &to).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(&fresh);
+    Ok(aside)
+}

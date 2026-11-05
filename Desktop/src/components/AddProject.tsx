@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Check, FolderOpen, FolderSearch, UploadCloud, X } from "lucide-react";
 import { api } from "../lib/api";
-import { parseInfo } from "../lib/parse";
+import { parseInfo, parseStatus } from "../lib/parse";
 import { invalidateStatus } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { Field, Modal, Spinner } from "./ui";
@@ -115,6 +115,9 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
     try {
       mark(0, "run");
       await invoke("write_text_file", { path: `${folder}\\.loreignore`, contents: IGNORE_TEMPLATE, overwrite: false });
+      // A .loreignore from an earlier attempt may not mention Git yet.
+      const ignore = (await api.readText(`${folder}/.loreignore`)) ?? "";
+      if (!/^\/?\.git\/?$/m.test(ignore)) await api.writeText(`${folder}/.loreignore`, `${ignore.replace(/\s*$/, "\n")}/.git/\n`);
       const stats = await api.folderStats(folder).catch(() => null);
       mark(0, "done", { detail: stats ? `${stats.files.toLocaleString()} files, ${size(stats.bytes)} (without Saved, Intermediate, Binaries and DerivedDataCache)` : undefined });
 
@@ -130,6 +133,22 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
         if (!linked) {
           const aside = await api.setAsideLore(folder);
           mark(1, "run", { detail: `This folder belonged to a project that is no longer on the server. Its old Lore data is kept in ${aside.split(/[\\/]/).pop()}.` });
+        }
+      }
+      if (linked) {
+        // Nothing was saved in it yet, so whatever an earlier attempt left in the local store is of no use and can get in the way
+        // (it made Lore report a hash collision). The project gets a clean store; the old one is kept aside.
+        const state = await api.lore(["status"], folder, server.id);
+        const parsed = state.ok ? parseStatus(state.stdout) : null;
+        if (parsed && parsed.localRevision === 0 && parsed.remoteRevision === 0) {
+          const again = await api.lore(["repository", "info"], folder);
+          const linkedName = remote.find((r) => r.id === parseInfo(again.stdout).id)?.name ?? serverName(name);
+          const fresh = await api.metaDir(`fresh-${Date.now()}`);
+          const cloned = await api.lore(["clone", `${server.loreUrl}/${linkedName}`, fresh], null, server.id);
+          if (cloned.ok) {
+            const aside = await api.relinkLore(folder, fresh);
+            if (aside) mark(1, "run", { detail: `Started with a clean local store. The old one is kept in ${aside.split(/[\\/]/).pop()}.` });
+          }
         }
       }
       if (!linked) {
