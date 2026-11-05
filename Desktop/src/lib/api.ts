@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AdminUser, CliResult, Engine, FolderListing, Grant, Server, SessionInfo, Settings } from "./types";
 
+const streams = new Set<string>();
+
 export const api = {
   getSettings: () => invoke<Partial<Settings>>("get_settings"),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
@@ -15,14 +17,17 @@ export const api = {
     invoke<CliResult>("lore_cli", { args, repository: repository ?? null, serverId: serverId ?? null }),
 
   /** Runs lore and reports every line of output while it works. */
+  cancelStreams: () => Promise.all([...streams].map((id) => invoke<void>("lore_cancel", { streamId: id }))),
   loreStream: async (args: string[], repository: string | null, serverId: string | null, onLine: (line: string) => void) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    streams.add(id);
     const stop = await listen<{ id: string; line: string }>("lore-line", (event) => {
       if (event.payload.id === id) onLine(event.payload.line);
     });
     try {
       return await invoke<CliResult>("lore_cli_stream", { args, repository, serverId, streamId: id });
     } finally {
+      streams.delete(id);
       stop();
     }
   },

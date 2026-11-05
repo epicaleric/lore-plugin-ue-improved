@@ -5,6 +5,7 @@ import { Check, FolderOpen, FolderSearch, UploadCloud, X } from "lucide-react";
 import { api } from "../lib/api";
 import { parseInfo, parseStatus } from "../lib/parse";
 import { invalidateStatus } from "../lib/actions";
+import { endJob, startJob } from "../lib/jobs";
 import { useStore } from "../lib/store";
 import { Field, Modal, Spinner } from "./ui";
 
@@ -93,6 +94,8 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
 
   const upload = async () => {
     if (!server || !session) return;
+    // Two Lore commands in the same folder write over each other. That was behind the hash collision errors.
+    if (!startJob(folder)) return toast("This folder is already being uploaded.", "bad");
     const list: Step[] = [
       { label: "Prepare the folder", state: "wait" },
       { label: "Create the project on the server", state: "wait" },
@@ -182,6 +185,7 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
       toast(`${serverName(name)} is on the server`, "good");
       setTimeout(onClose, 1200);
     } finally {
+      endJob(folder);
       setRunning(false);
     }
   };
@@ -191,11 +195,15 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
       wide
       title="Add a project"
       sub="Put a project from this PC on the server, or show a folder that already has Lore projects."
-      onClose={onClose}
+      onClose={() => !running && onClose()}
       actions={
         mode === "upload" && !done ? (
           <>
-            <button className="btn" onClick={onClose} disabled={running}>Cancel</button>
+            {running ? (
+              <button className="btn danger" onClick={() => api.cancelStreams()}>Stop upload</button>
+            ) : (
+              <button className="btn" onClick={onClose}>Cancel</button>
+            )}
             <button className="btn primary" disabled={!folder || !serverName(name) || running || !session} onClick={upload}>
               {running ? <Spinner /> : <UploadCloud size={16} />} Upload to {server?.label ?? "server"}
             </button>

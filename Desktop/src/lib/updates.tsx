@@ -1,3 +1,4 @@
+import { jobsRunning } from "./jobs";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -154,6 +155,10 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
 
   const installApp = useCallback(async () => {
     if (!app.asset) return;
+    if (jobsRunning()) {
+      toast("An upload is running. Lore+ updates when it is done.", "info");
+      return;
+    }
     await withBusy("app", async () => {
       toast(`Updating Lore+ to ${app.latest}. The app closes for a moment and opens again by itself.`, "info");
       await new Promise((resolve) => setTimeout(resolve, 3500));

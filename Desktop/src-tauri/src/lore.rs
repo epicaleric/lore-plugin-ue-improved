@@ -3,7 +3,38 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Mutex;
 use tokio::process::Command;
+
+/// Running `lore` processes started with a stream id, so Cancel can really stop them.
+static RUNNING: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
+
+fn kill_tree(pid: u32) {
+    let mut kill = std::process::Command::new("taskkill");
+    kill.args(["/PID", &pid.to_string(), "/T", "/F"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        kill.creation_flags(0x0800_0000);
+    }
+    let _ = kill.output();
+}
+
+/// Stops the process that belongs to a stream id.
+pub fn cancel(id: &str) {
+    let pids: Vec<u32> = RUNNING.lock().map(|r| r.iter().filter(|(i, _)| i == id).map(|(_, p)| *p).collect()).unwrap_or_default();
+    for pid in pids {
+        kill_tree(pid);
+    }
+}
+
+/// Stops everything that is still running, for when the app closes.
+pub fn cancel_all() {
+    let pids: Vec<u32> = RUNNING.lock().map(|r| r.iter().map(|(_, p)| *p).collect()).unwrap_or_default();
+    for pid in pids {
+        kill_tree(pid);
+    }
+}
 
 #[derive(Serialize)]
 pub struct CliResult {
@@ -94,7 +125,7 @@ pub async fn run(args: &[String], repository: Option<&str>, token: Option<&str>)
 }
 
 /// Like `run`, but hands every line of output to `emit` while the command is still working, so the app can show progress.
-pub async fn run_stream<F>(args: &[String], repository: Option<&str>, token: Option<&str>, emit: F) -> CliResult
+pub async fn run_stream<F>(id: &str, args: &[String], repository: Option<&str>, token: Option<&str>, emit: F) -> CliResult
 where
     F: Fn(String) + Send + Sync + 'static,
 {
@@ -125,6 +156,10 @@ where
         }
     };
 
+    if let (Some(pid), Ok(mut running)) = (child.id(), RUNNING.lock()) {
+        running.push((id.to_string(), pid));
+    }
+
     async fn pump<R: AsyncRead + Unpin>(reader: R, emit: Arc<dyn Fn(String) + Send + Sync>) -> String {
         let mut lines = BufReader::new(reader);
         let mut all = String::new();
@@ -148,6 +183,9 @@ where
     let out = tokio::spawn(pump(child.stdout.take().unwrap(), emit.clone()));
     let err = tokio::spawn(pump(child.stderr.take().unwrap(), emit));
     let status = child.wait().await;
+    if let Ok(mut running) = RUNNING.lock() {
+        running.retain(|(i, _)| i != id);
+    }
     let stdout = out.await.unwrap_or_default();
     let stderr = err.await.unwrap_or_default();
     match status {

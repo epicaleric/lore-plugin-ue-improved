@@ -123,9 +123,6 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
             )}
           </div>
         </div>
-        <div className="card-meta" style={{ minHeight: 36, alignItems: "flex-start" }}>
-          {view.last ? <span style={{ color: "#bfc6d8", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{firstLine(view.last.description)}</span> : <span className="faint">{project.local ? "No history yet" : "Clone to see the history"}</span>}
-        </div>
         <div className="card-actions" onClick={(e) => e.stopPropagation()}>
           {project.local ? (
             <>

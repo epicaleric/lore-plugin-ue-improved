@@ -153,10 +153,16 @@ async fn lore_cli(args: Vec<String>, repository: Option<String>, server_id: Opti
 async fn lore_cli_stream(app: AppHandle, args: Vec<String>, repository: Option<String>, server_id: Option<String>, stream_id: String) -> CliResult {
     let token = server_id.as_deref().and_then(load_token).map(|s| s.token);
     let id = stream_id.clone();
-    lore::run_stream(&args, repository.as_deref(), token.as_deref(), move |line| {
+    lore::run_stream(&stream_id, &args, repository.as_deref(), token.as_deref(), move |line| {
         let _ = app.emit("lore-line", json!({ "id": id, "line": line }));
     })
     .await
+}
+
+/// Stops a command that was started with `lore_cli_stream`.
+#[tauri::command]
+fn lore_cancel(stream_id: String) {
+    lore::cancel(&stream_id);
 }
 
 // ------------------------------------------------------------------ admin API
@@ -222,6 +228,7 @@ pub fn run() {
             sign_out,
             lore_cli,
             lore_cli_stream,
+            lore_cancel,
             admin_request,
             server_health,
             system::list_engines,
@@ -247,6 +254,12 @@ pub fn run() {
             system::folder_stats,
             system::folder_listing,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Lore+");
+        .build(tauri::generate_context!())
+        .expect("error while building Lore+")
+        .run(|_app, event| {
+            // A lore command must not keep running (and writing) after the app is gone.
+            if let tauri::RunEvent::Exit = event {
+                lore::cancel_all();
+            }
+        });
 }
