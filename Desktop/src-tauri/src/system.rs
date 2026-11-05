@@ -140,6 +140,7 @@ pub fn scan_lore_projects(roots: Vec<String>) -> Vec<String> {
 
 #[tauri::command]
 pub fn read_project(path: String) -> Value {
+    let mut needs_plugin = false;
     let dir = PathBuf::from(&path);
     let mut uproject: Option<PathBuf> = None;
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -160,6 +161,7 @@ pub fn read_project(path: String) -> Value {
         if let Ok(text) = std::fs::read_to_string(file) {
             if let Ok(json) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
                 engine = json["EngineAssociation"].clone();
+                needs_plugin = json["Plugins"].as_array().is_some_and(|list| list.iter().any(|p| p["Name"] == "LoreSourceControl" && p["Enabled"] != false));
                 description = json["Description"].clone();
             }
         }
@@ -188,6 +190,9 @@ pub fn read_project(path: String) -> Value {
         "description": description,
         "thumbnail": thumbnail,
         "repoId": repo_id_of(&dir),
+        "pluginBroken": dir.join(r"Plugins\LoreSourceControl\LoreSourceControl.uplugin").exists() && !dir.join(r"Plugins\LoreSourceControl\Binaries\Win64\UnrealEditor-LoreSourceControl.dll").exists(),
+        "needsPlugin": needs_plugin,
+        "isGit": dir.join(".git").exists(),
         "plugin": plugin_version_of(&dir.join(r"Plugins\LoreSourceControl\LoreSourceControl.uplugin")),
     })
 }
@@ -391,15 +396,51 @@ fn find_plugin_root(dir: &Path, depth: u32) -> Option<PathBuf> {
 }
 
 /// kind = "project" (copy the source into the project) or "engine" (build with RunUAT, install into the engine).
+/// Puts a plugin folder in place. The new copy is complete before the old one goes, so a failed copy changes nothing.
+fn replace_folder(from: &Path, to: &Path) -> std::io::Result<()> {
+    let parent = to.parent().ok_or(std::io::ErrorKind::NotFound)?;
+    std::fs::create_dir_all(parent)?;
+    let fresh = parent.join(".LoreSourceControl.new");
+    let old = parent.join(".LoreSourceControl.old");
+    let _ = std::fs::remove_dir_all(&fresh);
+    let _ = std::fs::remove_dir_all(&old);
+    copy_dir(from, &fresh)?;
+    if to.exists() {
+        if let Err(error) = std::fs::rename(to, &old) {
+            let _ = std::fs::remove_dir_all(&fresh);
+            return Err(error);
+        }
+    }
+    std::fs::rename(&fresh, to)?;
+    let _ = std::fs::remove_dir_all(&old);
+    Ok(())
+}
+
+/// Same, for a folder that needs administrator rights (an engine under Program Files). Windows asks for permission.
+async fn replace_folder_elevated(from: &Path, to: &Path) -> Result<(), String> {
+    let script = format!(
+        "$p = Start-Process robocopy.exe -ArgumentList '\"{}\"','\"{}\"','/MIR','/NFL','/NDL','/NJH','/NJS' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; if ($p.ExitCode -ge 8) {{ exit 1 }}",
+        from.display(),
+        to.display()
+    );
+    let status = Command::new("powershell").args(["-NoProfile", "-Command", &script]).creation_flags_hidden().status().await.map_err(|e| e.to_string())?;
+    if status.success() { Ok(()) } else { Err("The plugin could not be copied into the engine. Was the permission prompt declined?".into()) }
+}
+
 #[tauri::command]
-pub async fn install_plugin(app: AppHandle, kind: String, target: String) -> Result<(), String> {
+pub async fn install_plugin(app: AppHandle, kind: String, target: String, prebuilt: Option<String>) -> Result<(), String> {
     let task = format!("plugin:{target}");
-    let work = std::env::temp_dir().join("lorehub-plugin");
-    let _ = std::fs::remove_dir_all(&work);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let work = std::env::temp_dir().join(format!("loreplus-plugin-{stamp}"));
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
 
+    // A project that is opened without C++ tools needs the built plugin, so source code alone is never put in a project.
+    if kind == "project" && prebuilt.is_none() {
+        return Err("There is no ready-made build of the plugin for this Unreal version yet.".into());
+    }
+
     let zip_path = work.join("plugin.zip");
-    download(&app, &task, PLUGIN_ZIP, &zip_path).await?;
+    download(&app, &task, prebuilt.as_deref().unwrap_or(PLUGIN_ZIP), &zip_path).await?;
 
     log(&app, &task, "Unpacking...");
     let extract_to = work.join("src");
@@ -410,15 +451,38 @@ pub async fn install_plugin(app: AppHandle, kind: String, target: String) -> Res
     }
     let plugin_root = find_plugin_root(&extract_to, 4).ok_or("The plugin was not found in the download")?;
 
-    if kind == "project" {
-        let destination = Path::new(&target).join("Plugins").join("LoreSourceControl");
-        log(&app, &task, format!("Copying into {}", destination.display()));
-        if destination.exists() {
-            // Keep any built binaries out of the way of a clean source copy.
-            std::fs::remove_dir_all(&destination).map_err(|e| e.to_string())?;
+    if prebuilt.is_some() {
+        if !plugin_root.join(r"Binaries\Win64\UnrealEditor-LoreSourceControl.dll").exists() {
+            return Err("The download has no built plugin in it.".into());
         }
-        copy_dir(&plugin_root, &destination).map_err(|e| e.to_string())?;
-        log(&app, &task, "Done. The project compiles the plugin the next time it is opened.");
+        // Unreal only loads a build made for exactly this engine update.
+        if kind != "project" {
+            let build_of = |file: PathBuf| -> Option<String> {
+                let json: Value = serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()?;
+                json["BuildId"].as_str().map(|s| s.to_string())
+            };
+            let engine_build = build_of(PathBuf::from(&target).join(r"Engine\Binaries\Win64\UnrealEditor.modules"));
+            let plugin_build = build_of(plugin_root.join(r"Binaries\Win64\UnrealEditor.modules"));
+            if let (Some(engine_build), Some(plugin_build)) = (engine_build, plugin_build) {
+                if engine_build != plugin_build {
+                    return Err(format!("This build of the plugin is for another update of this Unreal version (build {plugin_build}, your engine is {engine_build}). Update Unreal Engine in the Epic Games Launcher."));
+                }
+            }
+        }
+        let destination = if kind == "project" {
+            Path::new(&target).join("Plugins").join("LoreSourceControl")
+        } else {
+            PathBuf::from(&target).join(r"Engine\Plugins\Marketplace\LoreSourceControl")
+        };
+        log(&app, &task, format!("Copying into {}", destination.display()));
+        let result = match replace_folder(&plugin_root, &destination) {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied && kind != "project" => replace_folder_elevated(&plugin_root, &destination).await,
+            Err(error) => Err(format!("Could not replace the plugin ({error}). Close Unreal Engine and try again.")),
+            Ok(()) => Ok(()),
+        };
+        let _ = std::fs::remove_dir_all(&work);
+        result?;
+        log(&app, &task, "Done.");
         return Ok(());
     }
 
@@ -648,4 +712,42 @@ pub fn write_binary_file(path: String, data: String) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(&path, bytes).map_err(|e| e.to_string())
+}
+
+async fn git(dir: &str, args: &[&str]) -> Result<(bool, String), String> {
+    let output = Command::new("git").arg("-C").arg(dir).args(args).creation_flags_hidden().output().await.map_err(|e| format!("Could not start git: {e}"))?;
+    let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    Ok((output.status.success(), text.trim().to_string()))
+}
+
+/// The Git remotes of a folder, for the GitHub mirror setting.
+#[tauri::command]
+pub async fn git_remotes(path: String) -> Result<Vec<String>, String> {
+    let (ok, text) = git(&path, &["remote"]).await?;
+    if !ok {
+        return Err(text);
+    }
+    Ok(text.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+}
+
+/// Saves what is in the folder as a Git commit, when something changed, and sends it to the remote. Never forces anything.
+#[tauri::command]
+pub async fn git_mirror(path: String, remote: String, branch: String, message: String) -> Result<String, String> {
+    let (ok, text) = git(&path, &["add", "-A"]).await?;
+    if !ok {
+        return Err(text);
+    }
+    let (clean, _) = git(&path, &["diff", "--cached", "--quiet"]).await?;
+    if !clean {
+        let (ok, text) = git(&path, &["commit", "-m", &message]).await?;
+        if !ok {
+            return Err(text);
+        }
+    }
+    let target = format!("HEAD:{branch}");
+    let (ok, text) = git(&path, &["push", &remote, &target]).await?;
+    if !ok {
+        return Err(text);
+    }
+    Ok(if clean { "Nothing new for GitHub.".to_string() } else { "Sent to GitHub.".to_string() })
 }

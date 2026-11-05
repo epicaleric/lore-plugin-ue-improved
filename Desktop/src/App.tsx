@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Logo } from "./components/Logo";
+import { Background } from "./components/Background";
 import { Sidebar } from "./components/Sidebar";
 import { ServerForm, SignInForm } from "./components/Servers";
 import { Spinner } from "./components/ui";
@@ -82,6 +83,7 @@ export default function App() {
   }
   return (
     <UpdatesProvider>
+      <Background />
       <div className="app">
         <Sidebar />
         <main className="main">

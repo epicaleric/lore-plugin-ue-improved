@@ -276,6 +276,8 @@ pub fn run() {
             system::set_aside_folder,
             system::relink_lore,
             system::repo_id,
+            system::git_remotes,
+            system::git_mirror,
             system::write_binary_file,
             system::folder_stats,
             system::folder_listing,

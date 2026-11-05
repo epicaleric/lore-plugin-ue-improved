@@ -90,6 +90,14 @@ export async function loadRemoteInfo(server: Server, repo: RemoteRepo, known: Re
     }
   }
 
+  // Also the plain thumbnail.png at the top of a project.
+  const plain = files.find((p) => /^thumbnail\.png$/i.test(p));
+  if (!thumbnail && plain) {
+    const target = at(side, `thumbnail-${revision}.png`);
+    const got = await api.lore(["file", "write", "--path", plain, "--output", target], dir, server.id);
+    if (got.ok) thumbnail = target;
+  }
+
   const history = await api.lore(["history", "200"], dir, server.id);
   const revisions = history.ok ? parseHistory(history.stdout) : [];
   const authors: string[] = [];

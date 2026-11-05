@@ -37,3 +37,5 @@ Desktop/node_modules/
 Desktop/dist/
 Desktop/src-tauri/target/
 Desktop/src-tauri/gen/
+.lore/
+.lore.old-*/

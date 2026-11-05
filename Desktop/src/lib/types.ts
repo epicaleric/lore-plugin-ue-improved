@@ -34,6 +34,14 @@ export interface ProjectOverride {
   thumbnail?: string;
 }
 
+/** Sends every new version of a project to a Git remote as well. */
+export interface MirrorConfig {
+  remote: string;
+  branch: string;
+  /** last Lore revision that was sent */
+  revision: number;
+}
+
 export type SortKey = "name" | "opened" | "updated" | "revisions";
 
 export interface Settings {
@@ -50,6 +58,8 @@ export interface Settings {
   accent: string;
   view: "grid" | "list";
   sort: SortKey;
+  /** repository id -> GitHub mirror on this PC */
+  mirrors: Record<string, MirrorConfig>;
   /** how big the cards (grid) and the thumbnails (list) are */
   size: { grid: number; list: number };
   /** repository id -> when the project was last opened here */
@@ -78,6 +88,11 @@ export interface LocalProject {
   description: string | null;
   thumbnail: string | null;
   plugin: string | null;
+  /** the plugin is in the project, but without the built DLL */
+  pluginBroken: boolean;
+  /** the .uproject asks for the plugin */
+  needsPlugin: boolean;
+  isGit: boolean;
   repoId?: string;
   repoName?: string;
   remoteUrl?: string;

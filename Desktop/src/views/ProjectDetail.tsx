@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, Download, EyeOff, FolderInput, FolderOpen, Lock, Play, RefreshCw, Search, ShieldCheck, Trash2, Users } from "lucide-react";
-import { Avatar, Empty, Field, Pill, Spinner, Thumb, forgetImages } from "../components/ui";
+import { Avatar, Empty, Field, Pill, Spinner, Switch, Thumb, forgetImages } from "../components/ui";
 import { api, adminApi } from "../lib/api";
 import { formatBytes, fullDate, timeAgo } from "../lib/format";
-import { layoutDescription, parseHistory } from "../lib/parse";
+import { layoutDescription, parseHistory, parseStatus } from "../lib/parse";
 import { invalidateStatus, useProjectActions } from "../lib/actions";
 import { useStore } from "../lib/store";
+import { squarePng, thumbnailPathOf } from "../lib/image";
 import { pluginIsOutdated, useUpdates } from "../lib/updates";
 import type { AdminUser, FolderListing, Grant, LocalProject, Project, Revision } from "../lib/types";
 import { ConfirmModal, useDeletes } from "../components/Danger";
+import { Changes } from "./Changes";
 import { StatusPill, useProjectView } from "./Projects";
 
-type Tab = "overview" | "history" | "access" | "settings";
+type Tab = "overview" | "changes" | "history" | "access" | "settings";
 
 function History({ path }: { path: string }) {
   const [revisions, setRevisions] = useState<Revision[] | null>(null);
@@ -124,6 +126,46 @@ function Access({ repoId, repoName }: { repoId: string; repoName: string }) {
   );
 }
 
+/** Sends every new version of a project that is also a Git repository to GitHub. */
+function MirrorSettings({ project }: { project: Project }) {
+  const { settings, update, toast } = useStore();
+  const [remotes, setRemotes] = useState<string[]>([]);
+  const local = project.local;
+  const id = project.id;
+  useEffect(() => {
+    if (local?.isGit) api.gitRemotes(local.path).then(setRemotes).catch(() => setRemotes([]));
+  }, [local?.path]);
+  if (!local?.isGit || !id) return null;
+  const mirror = settings.mirrors[id];
+  const set = (next: typeof mirror | undefined) => {
+    const all = { ...settings.mirrors };
+    if (next) all[id] = next;
+    else delete all[id];
+    update({ mirrors: all });
+  };
+  const start = async () => {
+    const state = await api.lore(["status"], local.path);
+    set({ remote: remotes[0] ?? "origin", branch: "main", revision: state.ok ? parseStatus(state.stdout).localRevision : 0 });
+    toast("New versions go to GitHub from now on", "good");
+  };
+  return (
+    <Field label="GitHub" hint="This folder is also a Git repository. New versions are sent along with their description, from this PC, as long as Lore+ is open.">
+      <div className="row gap-s">
+        <Switch on={!!mirror} onChange={(on) => (on ? start() : set(undefined))} />
+        <span>Also send every new version to GitHub</span>
+      </div>
+      {mirror && (
+        <div className="row gap-s" style={{ marginTop: 8 }}>
+          <select className="select" value={mirror.remote} onChange={(e) => set({ ...mirror, remote: e.target.value })}>
+            {remotes.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <input className="input" value={mirror.branch} onChange={(e) => set({ ...mirror, branch: e.target.value })} placeholder="Branch" />
+        </div>
+      )}
+    </Field>
+  );
+}
+
 function ProjectSettings({ projectKey }: { projectKey: string }) {
   const { projects, settings, update, engines, toast, categories, reload } = useStore();
   const project = projects.find((p) => p.key === projectKey)!;
@@ -167,6 +209,7 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
           {categories.map((c) => <option key={c.id} value={c.id}>{c.parentId ? "   " : ""}{c.name}</option>)}
         </select>
       </Field>
+      <MirrorSettings project={project} />
       <Field label="Thumbnail" hint="Saved in the Unreal project itself (a .png next to the .uproject). It goes to the server with the next version you save, so everybody sees it.">
         <div className="row gap-s">
           <button className="btn" disabled={!project.local?.uproject} onClick={async () => {
@@ -174,23 +217,8 @@ function ProjectSettings({ projectKey }: { projectKey: string }) {
             if (!file || Array.isArray(file) || !project.local?.uproject) return;
             try {
               // Unreal's own project thumbnail: a square png next to the .uproject, named like it.
-              const picture = await api.readImage(file);
-              if (!picture) throw new Error("That image could not be read.");
-              const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => resolve(img);
-                img.onerror = () => reject(new Error("That image could not be opened."));
-                img.src = picture;
-              });
-              const side = 256;
-              const canvas = document.createElement("canvas");
-              canvas.width = side;
-              canvas.height = side;
-              const crop = Math.min(image.width, image.height);
-              canvas.getContext("2d")!.drawImage(image, (image.width - crop) / 2, (image.height - crop) / 2, crop, crop, 0, 0, side, side);
-              const uproject = project.local.uproject.replace(/\\/g, "/");
-              const target = uproject.replace(/\.uproject$/i, ".png");
-              await api.writeBinary(target, canvas.toDataURL("image/png").split(",")[1]);
+              const target = thumbnailPathOf(project.local.uproject);
+              await api.writeBinary(target, await squarePng(file));
               set({ thumbnail: undefined });
               forgetImages();
               await reload();
@@ -402,7 +430,7 @@ export function ProjectDetail() {
           <>
             {behind > 0 && <button className="btn" disabled={!!working} onClick={() => sync(project)}>{working ? <Spinner /> : <Download size={16} />} Sync {behind}</button>}
             <button className="btn" onClick={() => api.openPath(project.local!.path)}><FolderOpen size={16} /> Folder</button>
-            <button className="btn primary" onClick={() => openProject(project)}><Play size={16} /> Open in Unreal</button>
+            {project.local.uproject && <button className="btn primary" onClick={() => openProject(project)}><Play size={16} /> Open in Unreal</button>}
           </>
         ) : project.onServer ? (
           <>
@@ -413,8 +441,8 @@ export function ProjectDetail() {
       </div>
       <div className="content">
         <div className="tabs">
-          {(["overview", "history", "access", "settings"] as Tab[]).map((t) => (
-            <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
+          {(project.local ? ["overview", "changes", "history", "access", "settings"] : ["overview", "history", "access", "settings"] as Tab[]).map((t) => (
+            <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t as Tab)}>
               {t === "access" && <Users size={15} />}{t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
@@ -444,9 +472,9 @@ export function ProjectDetail() {
                   <tr><td className="muted">Changed files</td><td>{view.status?.changes ?? "-"}</td></tr>
                   <tr><td className="muted">Lore plugin</td><td>
                     <div className="row">
-                      <span>{project.local.plugin ? `Installed (${project.local.plugin})` : "Not installed in this project"}{pluginOld && updates.plugin.latest ? ` · ${updates.plugin.latest} is available` : ""}</span>
-                      <button className="btn small" disabled={pluginBusy || !project.local.uproject} onClick={() => updates.installPlugin("project", project.local!.path)}>
-                        {pluginBusy ? <Spinner size={14} /> : <Download size={14} />} {project.local.plugin ? (pluginOld ? "Update" : "Reinstall") : "Install"}
+                      <span>{project.local.pluginBroken ? "The built plugin is missing, Unreal cannot load it" : project.local.plugin ? `Installed (${project.local.plugin})` : project.local.needsPlugin ? "Comes from the engine" : "Not installed in this project"}{pluginOld && updates.plugin.latest ? ` · ${updates.plugin.latest} is available` : ""}</span>
+                      <button className="btn small" disabled={pluginBusy || !project.local.uproject} onClick={() => updates.installPlugin("project", project.local!.path, view.engine)}>
+                        {pluginBusy ? <Spinner size={14} /> : <Download size={14} />} {project.local.pluginBroken ? "Repair" : project.local.plugin ? (pluginOld ? "Update" : "Reinstall") : "Install"}
                       </button>
                     </div>
                   </td></tr>
@@ -459,6 +487,7 @@ export function ProjectDetail() {
           </div>
         )}
 
+        {tab === "changes" && project.local && <Changes key={project.local.path} project={project} />}
         {tab === "history" && (project.local ? <History path={project.local.path} /> : <Empty icon={<Download size={28} />} title="Clone the project to see its history">The history is read from the copy on your PC.</Empty>)}
         {tab === "access" && (project.id ? <Access repoId={project.id} repoName={view.name} /> : <div className="banner">Access can be set once the project is on the server.</div>)}
         {tab === "settings" && (<><ProjectSettings projectKey={project.key} /><DangerZone project={project} /></>)}

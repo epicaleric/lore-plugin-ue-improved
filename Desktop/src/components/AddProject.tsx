@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Check, FolderOpen, FolderSearch, UploadCloud, X } from "lucide-react";
 import { api } from "../lib/api";
+import { squarePng, thumbnailPathOf } from "../lib/image";
 import { parseStatus } from "../lib/parse";
 import { invalidateStatus } from "../lib/actions";
 import { endJob, startJob } from "../lib/jobs";
@@ -21,6 +22,9 @@ const IGNORE_TEMPLATE = `# Generated Unreal and workstation state
 /Binaries/
 /Builds/
 **/Intermediate/
+.git/
+.lore/
+.lore.old-*/
 .vs/
 .idea/
 .vscode/
@@ -121,6 +125,12 @@ export function AddProjectModal({ onClose }: { onClose: () => void }) {
       // A .loreignore from an earlier attempt may not mention Git yet.
       const ignore = (await api.readText(`${folder}/.loreignore`)) ?? "";
       if (!/^\/?\.git\/?$/m.test(ignore)) await api.writeText(`${folder}/.loreignore`, `${ignore.replace(/\s*$/, "\n")}/.git/\n`);
+      // A thumbnail in Saved stays behind, so it is copied to where Unreal and the server look for it.
+      const details = await api.readProject(folder);
+      if (details.uproject && details.thumbnail) {
+        const target = thumbnailPathOf(details.uproject);
+        if (!(await api.exists(target))) await api.writeBinary(target, await squarePng(details.thumbnail)).catch(() => {});
+      }
       const stats = await api.folderStats(folder).catch(() => null);
       mark(0, "done", { detail: stats ? `${stats.files.toLocaleString()} files, ${size(stats.bytes)} (without Saved, Intermediate, Binaries and DerivedDataCache)` : undefined });
 

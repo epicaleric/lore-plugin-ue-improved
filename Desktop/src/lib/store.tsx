@@ -25,6 +25,7 @@ export const defaultSettings: Settings = {
   accent: "#1ab6ff",
   view: "grid",
   sort: "name",
+  mirrors: {},
   size: { grid: 250, list: 52 },
   opened: {},
   autoUpdate: { lore: true, plugin: true, app: true },

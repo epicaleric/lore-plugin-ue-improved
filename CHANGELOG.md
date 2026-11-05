@@ -2,6 +2,20 @@
 
 All notable changes. The plugin and the app are versioned separately: the plugin by `VersionName` in `LoreSourceControl.uplugin`, the app by the `desktop-v` tags.
 
+## Lore+ 0.2.0
+
+- Finds the newest version correctly (GitHub does not list releases by version), and keeps checking while the app is open.
+- Ready-made plugin builds: installing into a project or engine needs no C++ tools, a project with a damaged plugin is repaired, and a project that needs the plugin gets it in the engine.
+- Changes tab: save what changed as a new version and send it to the server.
+- GitHub mirror: every new version of a project that is also a Git repository can go to GitHub.
+- Sync works with staged files and puts plugin files back when they get in the way.
+
+## Plugin 0.3.2
+
+- Gemini: stable models first, the lighter model before the full one, a model that does not answer in time is skipped, and the model that worked is tried first next time.
+- Submit Content logs what a status pass found.
+- Ready-made builds per Unreal version are published as plugin-v releases.
+
 ## Lore Hub 0.1.0
 
 First version of the desktop app: servers and sign-in, project cards with thumbnails and Unreal versions, sync and clone, upload of a local project, history, categories, user and access administration, and automatic updates of the Lore client, the plugin and the app.

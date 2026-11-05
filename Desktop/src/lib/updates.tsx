@@ -18,7 +18,18 @@ export interface Component {
   asset?: string;
   error?: string;
   outdated: boolean;
+  /** Unreal version ("5.8") -> download of the ready-made plugin */
+  builds?: Record<string, string>;
 }
+
+/** Releases are not sorted by version on GitHub, so the newest one has to be looked for. */
+function newest(releases: any[], prefix: string) {
+  return releases
+    .filter((r) => String(r.tag_name).startsWith(prefix) && !r.draft && !r.prerelease)
+    .sort((a, b) => compareVersions(String(b.tag_name).slice(prefix.length), String(a.tag_name).slice(prefix.length)))[0];
+}
+
+const unrealVersion = (version: string) => version.split(".").slice(0, 2).join(".");
 
 interface UpdatesState {
   lore: Component;
@@ -31,7 +42,7 @@ interface UpdatesState {
   check: () => Promise<void>;
   installLore: () => Promise<void>;
   installApp: () => Promise<void>;
-  installPlugin: (kind: "engine" | "project", target: string) => Promise<void>;
+  installPlugin: (kind: "engine" | "project", target: string, engine: string | null) => Promise<void>;
 }
 
 const empty = (name: string): Component => ({ name, installed: null, latest: null, outdated: false });
@@ -47,7 +58,9 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   const [checking, setChecking] = useState(false);
   const [logs, setLogs] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const autoDone = useRef(false);
+  const autoClient = useRef(false);
+  const autoApp = useRef(false);
+  const handled = useRef(new Set<string>());
 
   useEffect(() => {
     const unlisten = listen<{ task: string; line: string }>("task-log", (event) => {
@@ -65,7 +78,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
         api.lore(["--version"]),
         api.getJson("https://api.github.com/repos/EpicGames/lore/releases/latest"),
         api.getText(PLUGIN_UPLUGIN),
-        api.getJson(`https://api.github.com/repos/${REPO}/releases?per_page=20`),
+        api.getJson(`https://api.github.com/repos/${REPO}/releases?per_page=100`),
         getVersion(),
       ]);
 
@@ -86,15 +99,23 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
         setLore({ ...empty("Lore client"), installed, error: "Could not check GitHub" });
       }
 
-      // Plugin
-      if (pluginText.status === "fulfilled") {
+      // Plugin: the newest ready-made build, or else the version in the repository.
+      const pluginRelease = releases.status === "fulfilled" ? newest(releases.value as any[], "plugin-v") : undefined;
+      if (pluginRelease) {
+        const builds: Record<string, string> = {};
+        for (const asset of pluginRelease.assets ?? []) {
+          const match = String(asset.name).match(/-UE(\d+\.\d+)-Win64\.zip$/i);
+          if (match) builds[match[1]] = asset.browser_download_url;
+        }
+        setPlugin({ name: "Unreal plugin", installed: null, latest: String(pluginRelease.tag_name).replace(/^plugin-v/, ""), url: pluginRelease.html_url, outdated: false, builds });
+      } else if (pluginText.status === "fulfilled") {
         let latest: string | null = null;
         try {
-          latest = JSON.parse(pluginText.value.replace(/^﻿/, "")).VersionName ?? null;
+          latest = JSON.parse(pluginText.value.replace(/^\uFEFF/, "")).VersionName ?? null;
         } catch {
           latest = null;
         }
-        setPlugin({ name: "Unreal plugin", installed: null, latest, url: REPO_URL, outdated: false });
+        setPlugin({ name: "Unreal plugin", installed: null, latest, url: REPO_URL, outdated: false, builds: {} });
       } else {
         setPlugin({ ...empty("Unreal plugin"), error: "Could not check GitHub", url: REPO_URL });
       }
@@ -102,7 +123,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
       // The app itself
       const currentVersion = current.status === "fulfilled" ? current.value : null;
       if (releases.status === "fulfilled") {
-        const release = (releases.value as any[]).find((r) => String(r.tag_name).startsWith("desktop-v") && !r.draft);
+        const release = newest(releases.value as any[], "desktop-v");
         const asset = release?.assets?.find((a: any) => /setup\.exe$/i.test(a.name));
         const latest = release ? String(release.tag_name).replace(/^desktop-v/, "") : null;
         setApp({
@@ -123,7 +144,11 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (ready) check();
+    if (!ready) return;
+    check();
+    // A window that stays open still hears about new versions.
+    const timer = setInterval(check, 30 * 60 * 1000);
+    return () => clearInterval(timer);
   }, [ready]);
 
   // Which engines and projects have an older plugin than the latest one?
@@ -167,30 +192,52 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   }, [app.asset, busy["app"]]);
 
   const installPlugin = useCallback(
-    async (kind: "engine" | "project", target: string) => {
+    async (kind: "engine" | "project", target: string, engine: string | null) => {
+      const prebuilt = engine ? plugin.builds?.[unrealVersion(engine)] ?? null : null;
       await withBusy(`plugin:${target}`, async () => {
-        await api.installPlugin(kind, target);
+        await api.installPlugin(kind, target, prebuilt);
         await reloadEngines();
         await reload();
       }, "Plugin installed");
     },
-    [reload, reloadEngines],
+    [reload, reloadEngines, plugin.builds],
   );
 
   // Automatic updates, once per start, for what the user switched on.
   useEffect(() => {
-    if (autoDone.current || checking || !ready || !lore.latest) return;
-    autoDone.current = true;
+    if (autoClient.current || checking || !ready || !lore.latest) return;
+    autoClient.current = true;
     if (settings.autoUpdate.lore && lore.outdated && lore.asset) installLore();
-    if (settings.autoUpdate.plugin && plugin.latest) {
-      for (const engine of engines) {
-        if (pluginOutdated(engine.plugin)) installPlugin("engine", engine.path);
-      }
-      // Projects are not changed on their own: the plugin files in a project are saved in Lore, so a new
-      // version there is a change the person has to save (and it can clash with a sync).
-    }
+  }, [checking, ready, lore.latest]);
+
+  useEffect(() => {
+    if (autoApp.current || checking || !ready || !app.latest) return;
+    autoApp.current = true;
     if (settings.autoUpdate.app && app.outdated && app.asset) installApp();
-  }, [checking, ready, lore.latest, plugin.latest, engines.length, locals.length]);
+  }, [checking, ready, app.latest]);
+
+  // The plugin: what is broken is repaired, what a project needs is put in the engine. Each thing once per start.
+  useEffect(() => {
+    if (!ready || !plugin.builds) return;
+    const once = (key: string, work: () => void) => {
+      if (handled.current.has(key)) return;
+      handled.current.add(key);
+      work();
+    };
+    for (const project of locals) {
+      if (project.pluginBroken && project.engine && plugin.builds[unrealVersion(project.engine)]) {
+        once(`repair:${project.path}`, () => installPlugin("project", project.path, project.engine));
+      }
+    }
+    if (!settings.autoUpdate.plugin) return;
+    for (const engine of engines) {
+      const wanted = locals.some((l) => l.needsPlugin && !l.plugin && l.engine && unrealVersion(l.engine) === unrealVersion(engine.version));
+      const available = !!plugin.builds[unrealVersion(engine.version)];
+      if (available && (pluginOutdated(engine.plugin) || (!engine.plugin && wanted))) {
+        once(`engine:${engine.path}`, () => installPlugin("engine", engine.path, engine.version));
+      }
+    }
+  }, [ready, plugin.latest, plugin.builds, engines, locals]);
 
   const value: UpdatesState = { lore, plugin, app, checking, available, logs, busy, check, installLore, installApp, installPlugin };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

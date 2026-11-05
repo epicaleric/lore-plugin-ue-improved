@@ -1,0 +1,11 @@
+# Git has its own history of this folder
+.git/
+.lore/
+.lore.old-*/
+
+# Generated
+Desktop/node_modules/
+Desktop/dist/
+Desktop/src-tauri/target/
+**/Intermediate/
+**/Binaries/

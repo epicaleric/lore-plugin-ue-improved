@@ -104,7 +104,7 @@ export function Updates() {
                     <td className="muted mono">{engine.path}</td>
                     <td style={{ width: 190 }}>{engine.plugin ? (old ? <Pill tone="warn">{engine.plugin} → {u.plugin.latest}</Pill> : <Pill tone="good"><Check size={12} /> {engine.plugin}</Pill>) : <Pill tone="muted">Not installed</Pill>}</td>
                     <td style={{ width: 130, textAlign: "right" }}>
-                      <button className="btn small" disabled={u.busy[key]} onClick={() => u.installPlugin("engine", engine.path)}>
+                      <button className="btn small" disabled={u.busy[key]} onClick={() => u.installPlugin("engine", engine.path, engine.version)}>
                         {u.busy[key] ? <Spinner size={14} /> : <Download size={14} />} {engine.plugin ? (old ? "Update" : "Rebuild") : "Install"}
                       </button>
                     </td>
@@ -113,7 +113,7 @@ export function Updates() {
               })}
             </tbody></table>
           )}
-          <div className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Installing into an engine builds the plugin with that engine's own tools. That takes a few minutes and needs the C++ tools of Visual Studio.</div>
+          <div className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>A ready-made build is used when there is one for that Unreal version. Otherwise the plugin is built with the engine's own tools, which takes a few minutes and needs the C++ tools of Visual Studio.</div>
           {engines.map((engine) => <Log key={engine.path} lines={u.logs[`plugin:${engine.path}`]} />)}
 
           <div className="section-title">Projects on this PC</div>
@@ -126,11 +126,11 @@ export function Updates() {
                 return (
                   <tr key={project.path}>
                     <td style={{ width: 220 }}><b>{project.repoName ?? project.name}</b></td>
-                    <td style={{ width: 190 }}>{project.plugin ? (old ? <Pill tone="warn">{project.plugin} → {u.plugin.latest}</Pill> : <Pill tone="good"><Check size={12} /> {project.plugin}</Pill>) : <Pill tone="muted">Not in project</Pill>}</td>
+                    <td style={{ width: 190 }}>{project.pluginBroken ? <Pill tone="bad">Needs a repair</Pill> : project.plugin ? (old ? <Pill tone="warn">{project.plugin} → {u.plugin.latest}</Pill> : <Pill tone="good"><Check size={12} /> {project.plugin}</Pill>) : <Pill tone="muted">Not in project</Pill>}</td>
                     <td className="muted" style={{ fontSize: 12.5 }}>Source copy in the project's Plugins folder</td>
                     <td style={{ width: 130, textAlign: "right" }}>
-                      <button className="btn small" disabled={u.busy[key] || !project.uproject} onClick={() => u.installPlugin("project", project.path)}>
-                        {u.busy[key] ? <Spinner size={14} /> : <Download size={14} />} {project.plugin ? (old ? "Update" : "Reinstall") : "Install"}
+                      <button className="btn small" disabled={u.busy[key] || !project.uproject} onClick={() => u.installPlugin("project", project.path, project.engine)}>
+                        {u.busy[key] ? <Spinner size={14} /> : <Download size={14} />} {project.pluginBroken ? "Repair" : project.plugin ? (old ? "Update" : "Reinstall") : "Install"}
                       </button>
                     </td>
                   </tr>

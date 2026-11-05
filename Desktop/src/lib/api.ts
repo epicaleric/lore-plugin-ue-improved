@@ -48,7 +48,7 @@ export const api = {
   defaultRoots: () => invoke<string[]>("default_roots"),
   scan: (roots: string[]) => invoke<string[]>("scan_lore_projects", { roots }),
   readProject: (path: string) =>
-    invoke<{ path: string; name: string; uproject: string | null; engine: string | null; description: string | null; thumbnail: string | null; plugin: string | null; repoId: string | null }>("read_project", { path }),
+    invoke<{ path: string; name: string; uproject: string | null; engine: string | null; description: string | null; thumbnail: string | null; plugin: string | null; repoId: string | null; pluginBroken: boolean; needsPlugin: boolean; isGit: boolean }>("read_project", { path }),
   readImage: (path: string) => invoke<string | null>("read_image", { path }),
   openProject: (uproject: string, editor?: string | null) => invoke<void>("open_project", { uproject, editor: editor ?? null }),
   openPath: (path: string) => invoke<void>("open_path", { path }),
@@ -63,7 +63,9 @@ export const api = {
   getText: (url: string) => invoke<string>("http_get_text", { url }),
   installLoreClient: (url: string) => invoke<void>("install_lore_client", { url }),
   installAppUpdate: (url: string) => invoke<void>("install_app_update", { url }),
-  installPlugin: (kind: "engine" | "project", target: string) => invoke<void>("install_plugin", { kind, target }),
+  installPlugin: (kind: "engine" | "project", target: string, prebuilt: string | null) => invoke<void>("install_plugin", { kind, target, prebuilt }),
+  gitRemotes: (path: string) => invoke<string[]>("git_remotes", { path }),
+  gitMirror: (path: string, remote: string, branch: string, message: string) => invoke<string>("git_mirror", { path, remote, branch, message }),
 
   /** Admin API of the auth service. Throws with the service's own message on errors. */
   admin: async <T = any>(server: Server, method: string, path: string, body?: unknown): Promise<T> => {

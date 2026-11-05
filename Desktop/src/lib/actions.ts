@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { parseHistory, parseStatus } from "./parse";
 import { useStore } from "./store";
+import { useUpdates } from "./updates";
 import type { Project, RepoStatus, Revision } from "./types";
 
 // ---- status and last revision of a local project, cached for the session
@@ -100,10 +101,24 @@ export function useLastRevision(path: string | undefined, nonce: number) {
   return revision;
 }
 
+/** The files in the "Changes staged for commit" part of `lore status`. */
+function stagedFiles(stdout: string): string[] {
+  const files: string[] = [];
+  let inside = false;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (/^Changes staged/.test(line)) inside = true;
+    else if (/^(Changes not staged|Untracked files|Tracked changes)/.test(line)) inside = false;
+    const match = line.match(/^[AMDR]\s+(.+?)\s*$/);
+    if (inside && match && !match[1].endsWith("/")) files.push(match[1]);
+  }
+  return files;
+}
+
 // ---- actions on projects
 
 export function useProjectActions() {
   const { server, settings, engines, toast, reload, update } = useStore();
+  const updates = useUpdates();
   const [busy, setBusy] = useState<Record<string, string>>({});
 
   const run = async (key: string, label: string, work: () => Promise<void>) => {
@@ -126,15 +141,21 @@ export function useProjectActions() {
     return engines.find((e) => wanted && (e.version === wanted || e.version.startsWith(`${wanted}.`)));
   };
 
-  const openProject = (project: Project) => {
-    const uproject = project.local?.uproject;
-    if (!uproject) {
-      toast("No .uproject file found in this folder.", "bad");
+  const openProject = async (project: Project) => {
+    const local = project.local;
+    if (!local) return;
+    // Not an Unreal project: its folder is what there is to open.
+    if (!local.uproject) {
+      api.openPath(local.path).catch((e) => toast(String(e), "bad"));
       return;
     }
     const engine = engineFor(project);
+    const version = engine?.version ?? local.engine;
+    // Unreal refuses a project whose plugin has no build, so that is put right first.
+    if (local.pluginBroken) await updates.installPlugin("project", local.path, version);
+    else if (local.needsPlugin && !local.plugin && engine && !engine.plugin) await updates.installPlugin("engine", engine.path, engine.version);
     if (project.id) update({ opened: { ...settings.opened, [project.id]: Date.now() } });
-    api.openProject(uproject, engine?.editor ?? null).catch((e) => toast(String(e), "bad"));
+    api.openProject(local.uproject, engine?.editor ?? null).catch((e) => toast(String(e), "bad"));
     if (!engine) toast("Opened with Windows' default. The matching engine version was not found.", "info");
   };
 
@@ -162,11 +183,36 @@ export function useProjectActions() {
     const path = project.local?.path;
     if (!path || !server) return;
     await run(project.key, "Syncing", async () => {
-      const result = await api.lore(["sync"], path, server.id);
+      let result = await api.lore(["sync"], path, server.id);
+
+      // Lore does not sync with files staged for the next version. They are set back to unstaged for the
+      // sync and staged again afterwards, nothing in them changes.
+      let staged: string[] = [];
+      if (!result.ok && /staged state/i.test(result.stderr + result.stdout)) {
+        const state = await api.lore(["status"], path, server.id);
+        staged = stagedFiles(state.stdout);
+        await api.lore(["unstage", "."], path, server.id);
+        result = await api.lore(["sync"], path, server.id);
+      }
+      const restage = async () => {
+        if (!staged.length) return;
+        const file = `${await api.bareDir()}/targets.txt`;
+        await api.writeText(file, staged.join("\n") + "\n");
+        await api.lore(["stage", "--targets", file], path, server.id);
+        staged = [];
+      };
+
+      const conflicts = (text: string) => [...text.matchAll(/File has local changes:\s*(.+?)\s*\(incoming/g)].map((m) => m[1]);
+      // The plugin is not project work: its files can always be put back to what the server has.
+      if (!result.ok && conflicts(result.stderr + result.stdout).some((f) => f.startsWith("Plugins/LoreSourceControl/"))) {
+        await api.lore(["reset", "Plugins/LoreSourceControl"], path, server.id);
+        result = await api.lore(["sync"], path, server.id);
+      }
+      await restage();
       if (!result.ok) {
         const text = (result.stderr || result.stdout).trim();
-        if (/file has local changes/i.test(text)) {
-          const files = [...text.matchAll(/File has local changes:\s*(\S+)/g)].map((m) => m[1]);
+        const files = conflicts(text);
+        if (files.length) {
           throw new Error(`Syncing stopped: ${files.length} file${files.length === 1 ? " has" : "s have"} changes on this PC that the new version changes as well (${files.slice(0, 2).join(", ")}${files.length > 2 ? ", ..." : ""}). Save your changes as a version first, then sync again.`);
         }
         throw new Error(text.split("\n").slice(0, 3).join(" "));

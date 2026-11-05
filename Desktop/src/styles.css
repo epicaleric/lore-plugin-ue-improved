@@ -271,3 +271,8 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 
 .project-card .card-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
 .card-actions { flex-wrap: wrap; }
+
+.change-list { max-height: 340px; overflow-y: auto; margin-top: 10px; border-top: 1px solid var(--border-soft); }
+.change-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
+.change-row:hover { background: rgba(255, 255, 255, 0.02); }
+.change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
