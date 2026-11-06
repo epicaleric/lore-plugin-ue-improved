@@ -66,6 +66,11 @@ namespace
 		const bool bStatusOk = LoreSourceControlUtils::RunCommandBatched(
 			TEXT("status"), StatusParams, RelativeFiles, Context, /*bUseTargetsFile=*/true,
 			StatusResults, Command.ErrorMessages);
+		if (!bStatusOk)
+		{
+			// The editor only says that checking failed, so the reason has to be findable in the log.
+			UE_LOG(LogLoreSourceControl, Warning, TEXT("`lore status` failed: %s"), *FString::Join(Command.ErrorMessages, TEXT(" | ")));
+		}
 
 		FLoreRepoStatus RepoStatus;
 		LoreSourceControlUtils::ParseStatusResults(StatusResults, Command.WorkingCopyRoot, RepoStatus, OutStates);

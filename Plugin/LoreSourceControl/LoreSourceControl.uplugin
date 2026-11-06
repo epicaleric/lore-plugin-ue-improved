@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
   "Version": 5,
-  "VersionName": "0.3.2",
+  "VersionName": "0.3.3",
   "FriendlyName": "Lore Source Control",
   "Description": "Native Lore source control provider for Unreal Engine.",
   "Category": "Revision Control",

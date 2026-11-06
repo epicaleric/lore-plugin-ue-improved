@@ -182,6 +182,12 @@ async fn lore_cli_stream(app: AppHandle, args: Vec<String>, repository: Option<S
     .await
 }
 
+#[tauri::command]
+async fn lore_client_login(server: Server) -> Result<CliResult, String> {
+    let stored = load_token(&server.id).ok_or("Not signed in")?;
+    Ok(lore::login(&server, &stored.token).await)
+}
+
 /// Stops a command that was started with `lore_cli_stream`.
 #[tauri::command]
 fn lore_cancel(stream_id: String) {
@@ -254,6 +260,7 @@ pub fn run() {
             lore_cli,
             lore_cli_stream,
             lore_cancel,
+            lore_client_login,
             admin_request,
             server_health,
             system::list_engines,

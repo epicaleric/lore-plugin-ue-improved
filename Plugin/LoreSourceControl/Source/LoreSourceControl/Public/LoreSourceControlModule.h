@@ -39,6 +39,14 @@ public:
 private:
 	void RegisterWorkers();
 
+	/** Adds the Lore window to the Revision Control menu in the status bar. */
+	void RegisterMenus();
+
+	/** A project that is a Lore working copy uses Lore without any setup: server and name come from its .lore folder. */
+	void ConfigureFromWorkingCopy();
+
+	FDelegateHandle PostEngineInitHandle;
+
 	FLoreSourceControlProvider LoreProvider;
 	FLoreSourceControlSettings LoreSettings;
 };

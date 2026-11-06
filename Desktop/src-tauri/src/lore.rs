@@ -128,6 +128,27 @@ pub async fn run(args: &[String], repository: Option<&str>, token: Option<&str>)
     }
 }
 
+/// Signs the `lore` client itself in, so everything that runs it without this app (the Unreal plugin) is signed in too.
+/// The token goes through the environment, not the command line, where other programs could read it.
+pub async fn login(server: &Server, token: &str) -> CliResult {
+    let mut command = Command::new(lore_exe());
+    command.args(["--no-pager", "--non-interactive", "auth", "login"]).arg(&server.lore_url);
+    command.args(["--token-type", "lore", "--no-browser", "--auth-url"]).arg(&server.auth_url);
+    command.env("LORE_TOKEN", token).env("NO_COLOR", "1");
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    match command.output().await {
+        Ok(output) => CliResult {
+            ok: output.status.success(),
+            code: output.status.code().unwrap_or(-1),
+            stdout: strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+            stderr: strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+        },
+        Err(error) => CliResult { ok: false, code: -1, stdout: String::new(), stderr: format!("Could not start lore: {error}") },
+    }
+}
+
 /// Like `run`, but hands every line of output to `emit` while the command is still working, so the app can show progress.
 pub async fn run_stream<F>(id: &str, args: &[String], repository: Option<&str>, token: Option<&str>, emit: F) -> CliResult
 where

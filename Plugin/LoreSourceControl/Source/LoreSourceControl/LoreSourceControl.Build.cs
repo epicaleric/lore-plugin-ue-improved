@@ -26,6 +26,7 @@ public class LoreSourceControl : ModuleRules
 			"UnrealEd",
 			"HTTP",
 			"Json",
+			"ToolMenus",
 			"WorkspaceMenuStructure"
 		});
 

@@ -147,6 +147,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const info = await api.session(server.id).catch(() => null);
     setSession(info);
     if (info) {
+      // The Unreal plugin runs `lore` by itself, so that has to be signed in as well.
+      api.loreClientLogin(server).then((result) => {
+        if (!result.ok) toastRef.current(`The Unreal plugin could not be signed in: ${(result.stderr || result.stdout).trim().split("\n")[0]}`, "bad");
+      }).catch(() => {});
       await adminApi
         .me(server)
         .then((me) => { adminRef.current = me.admin; setIsAdmin(me.admin); })
