@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowLeft, Download, EyeOff, FolderInput, FolderOpen, Lock, Play, RefreshCw, Search, ShieldCheck, Trash2, UploadCloud, Users } from "lucide-react";
+import { ArrowLeft, Copy, Download, EyeOff, FolderInput, FolderOpen, Lock, Play, RefreshCw, Search, ShieldCheck, Trash2, UploadCloud, Users } from "lucide-react";
 import { Avatar, Empty, Field, Pill, Spinner, Switch, Thumb, forgetImages } from "../components/ui";
 import { api, adminApi } from "../lib/api";
 import { formatBytes, fullDate, timeAgo } from "../lib/format";
@@ -13,6 +13,7 @@ import { pluginIsOutdated, useUpdates } from "../lib/updates";
 import type { AdminUser, FolderListing, Grant, LocalProject, Project, Revision } from "../lib/types";
 import { ConfirmModal, useDeletes } from "../components/Danger";
 import { Changes } from "./Changes";
+import { DuplicateModal } from "../components/Duplicate";
 import { StatusPill, madeWith, useProjectView } from "./Projects";
 
 type Tab = "overview" | "changes" | "history" | "access" | "settings";
@@ -506,6 +507,7 @@ export function ProjectDetail() {
   const updates = useUpdates();
   const project = projects.find((p) => p.key === projectKey);
   const [tab, setTab] = useState<Tab>("overview");
+  const [duplicating, setDuplicating] = useState(false);
   const view = useProjectView(project ?? { key: "", name: "", onServer: false, copies: [] });
   const copyTools = useCopyTools(project ?? { key: "", name: "", onServer: false, copies: [] });
   if (!project) return <Empty icon={<FolderOpen size={28} />} title="Project not found"><button className="btn" onClick={() => go("projects")}>Back to projects</button></Empty>;
@@ -535,6 +537,7 @@ export function ProjectDetail() {
           <>
             {behind > 0 && <button className="btn" disabled={!!working} onClick={() => sync(project)}>{working ? <Spinner /> : <Download size={16} />} Sync {behind}</button>}
             <button className="btn" onClick={() => api.openPath(project.local!.path)}><FolderOpen size={16} /> Folder</button>
+            {project.local.uproject && <button className="btn" onClick={() => setDuplicating(true)}><Copy size={16} /> Duplicate</button>}
             {project.local.uproject && <button className="btn primary" onClick={() => openProject(project)}><Play size={16} /> Open in Unreal</button>}
           </>
         ) : project.uefn ? (
@@ -603,6 +606,7 @@ export function ProjectDetail() {
         {tab === "access" && (project.id ? <Access repoId={project.id} repoName={view.name} /> : <div className="banner">Access can be set once the project is on the server.</div>)}
         {tab === "settings" && (<><ProjectSettings projectKey={project.key} /><DangerZone project={project} /></>)}
       </div>
+      {duplicating && <DuplicateModal project={project} onClose={() => setDuplicating(false)} />}
     </>
   );
 }

@@ -247,6 +247,32 @@ pub fn write_text_file(path: String, contents: String, overwrite: bool) -> Resul
 }
 
 
+/// Copies a project to a new folder without generated folders and without Lore's data, so it can become a project of its own.
+#[tauri::command]
+pub async fn copy_project(from: String, to: String) -> Result<(), String> {
+    if Path::new(&to).exists() {
+        return Err(format!("{to} already exists."));
+    }
+    let status = Command::new("robocopy")
+        .arg(&from)
+        .arg(&to)
+        .args(["/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/XD", ".lore", ".lore.old-*", ".git", ".vs", ".idea", "Saved", "Intermediate", "DerivedDataCache", "Binaries", "Builds"])
+        .creation_flags_hidden()
+        .status()
+        .await
+        .map_err(|e| format!("Could not start robocopy: {e}"))?;
+    // Robocopy reports success with exit codes below 8.
+    if status.code().unwrap_or(16) >= 8 {
+        return Err("Copying the project failed.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rename_path(from: String, to: String) -> Result<(), String> {
+    std::fs::rename(&from, &to).map_err(|e| e.to_string())
+}
+
 /// Removes a working copy. Only folders that hold a Lore working copy are accepted.
 #[tauri::command]
 pub fn delete_folder(path: String) -> Result<(), String> {
