@@ -1,6 +1,6 @@
 [package]
 name = "lore-desktop"
-version = "0.3.5"
+version = "0.3.6"
 description = "Desktop app for Lore: servers, projects, access and updates"
 authors = ["epicaleric"]
 edition = "2021"

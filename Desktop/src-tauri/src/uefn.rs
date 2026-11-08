@@ -216,5 +216,5 @@ pub async fn uefn_backup_copy(from: String, to: String) -> Result<(), String> {
     if !target.join(".lore").exists() {
         return Err("That folder is not a backup folder.".into());
     }
-    mirror(&source, &target, &["/XD", ".lore", ".urc", "Saved", "Intermediate", "Binaries", "DerivedDataCache", ".vs", ".vscode", ".git", "/XF", "session.resume", ".loreignore"]).await
+    mirror(&source, &target, &["/XD", ".lore", ".lore.old-*", ".urc", "Saved", "Intermediate", "Binaries", "DerivedDataCache", ".vs", ".vscode", ".git", "/XF", "session.resume", ".loreignore"]).await
 }
