@@ -4,7 +4,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Boxes, Check, ChevronDown, ChevronRig
 import { Avatar, Empty, Pill, Spinner, Thumb, useMenu } from "../components/ui";
 import { firstLine } from "../lib/parse";
 import { formatBytes, timeAgo } from "../lib/format";
-import { peekRevision, peekStatus, useAuthors, useCacheVersion, useLastRevision, useProjectActions, useStatus } from "../lib/actions";
+import { invalidateStatus, peekRevision, peekStatus, useAuthors, useCacheVersion, useLastRevision, useProjectActions, useStatus } from "../lib/actions";
 import { useStore } from "../lib/store";
 import { BACKUP_SUFFIX, isUefnBackup } from "../lib/uefn";
 import { api } from "../lib/api";
@@ -298,7 +298,7 @@ export function Projects() {
           <option value="updated">Recently updated</option>
           <option value="revisions">Most revisions</option>
         </select>
-        <button className="btn icon" title="Refresh" onClick={reload}>{loading ? <Spinner /> : <RefreshCw size={16} />}</button>
+        <button className="btn icon" title="Refresh" onClick={() => { invalidateStatus(); reload(); }}>{loading ? <Spinner /> : <RefreshCw size={16} />}</button>
         <div className="row gap-s" style={{ gap: 2 }}>
           <button className={`btn icon ${settings.view === "grid" ? "" : "ghost"}`} onClick={() => update({ view: "grid" })} title="Grid"><Grid2x2 size={16} /></button>
           <button className={`btn icon ${settings.view === "list" ? "" : "ghost"}`} onClick={() => update({ view: "list" })} title="List"><List size={16} /></button>
