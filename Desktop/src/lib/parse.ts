@@ -41,7 +41,8 @@ export function parseStatus(stdout: string): RepoStatus {
     if (match) {
       status.remoteRevision = Number(match[1]);
     }
-    if (/^[AMDR]\s+\S/.test(line) && !/\/\s*$/.test(line)) {
+    // Backup copies Lore+ makes before undoing or syncing are not changes to the project.
+    if (/^[AMDR]\s+\S/.test(line) && !/\/\s*$/.test(line) && !/^[AMDR]\s+Saved\/LoreBackups\//.test(line)) {
       status.changes += 1;
     }
   }

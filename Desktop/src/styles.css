@@ -289,3 +289,14 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .change-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
 .change-row:hover { background: rgba(255, 255, 255, 0.02); }
 .change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.conflict-list { display: flex; flex-direction: column; gap: 12px; }
+.conflict-file { padding: 12px 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--border-soft); }
+.choice { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; cursor: pointer; font-size: 13px; }
+.choice input { margin-top: 3px; }
+.choice .faint { font-size: 12.5px; margin-top: 2px; }
+.choice.disabled { opacity: 0.55; cursor: not-allowed; }
+.change-row.locked { cursor: not-allowed; }
+.change-row .undo { opacity: 0; }
+.change-row:hover .undo { opacity: 1; }
+.file-list { max-height: 220px; overflow-y: auto; margin: 6px 0 0; padding: 8px 12px; border-radius: 10px; background: var(--raised); font-size: 12.5px; }
+.conflict-path { font-size: 13px; word-break: break-all; }

@@ -3,6 +3,7 @@ import { Logo } from "./components/Logo";
 import { Background } from "./components/Background";
 import { Sidebar } from "./components/Sidebar";
 import { ServerForm, SignInForm } from "./components/Servers";
+import { SyncConflictDialog } from "./components/SyncConflict";
 import { Spinner } from "./components/ui";
 import { useStore } from "./lib/store";
 import { UpdatesProvider } from "./lib/updates";
@@ -94,6 +95,7 @@ export default function App() {
           {view === "settings" && <Settings />}
         </main>
       </div>
+      <SyncConflictDialog />
       <div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.text}</div>)}</div>
     </UpdatesProvider>
   );

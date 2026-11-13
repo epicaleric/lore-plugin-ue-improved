@@ -1,3 +1,4 @@
+mod changes;
 mod grpc;
 mod lore;
 mod system;
@@ -291,6 +292,10 @@ pub fn run() {
             system::folder_listing,
             system::copy_project,
             system::rename_path,
+            changes::backup_files,
+            changes::restore_files,
+            changes::remove_files,
+            changes::reveal_path,
             uefn::scan_uefn_projects,
             uefn::uefn_running,
             uefn::uefn_snapshot,

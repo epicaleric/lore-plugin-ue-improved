@@ -43,6 +43,11 @@ export const api = {
   relinkLore: (folder: string, fresh: string) => invoke<string>("relink_lore", { folder, fresh }),
   setAsideLore: (path: string) => invoke<string>("set_aside_lore", { path }),
   folderListing: (path: string) => invoke<FolderListing>("folder_listing", { path }),
+  /** Copies files to `<root>/Saved/LoreBackups/<stamp>/` and returns that folder. */
+  backupFiles: (root: string, stamp: string, paths: string[]) => invoke<string>("backup_files", { root, stamp, paths }),
+  restoreFiles: (backup: string, root: string, paths: string[]) => invoke<void>("restore_files", { backup, root, paths }),
+  removeFiles: (root: string, paths: string[]) => invoke<void>("remove_files", { root, paths }),
+  revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   folderStats: (path: string) => invoke<{ files: number; bytes: number }>("folder_stats", { path }),
 
   health: (server: Server) => invoke<{ lore: { ok: boolean; ms: number }; auth: { ok: boolean; ms: number } }>("server_health", { server }),

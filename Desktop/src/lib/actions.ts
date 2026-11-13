@@ -114,6 +114,23 @@ function stagedFiles(stdout: string): string[] {
   return files;
 }
 
+// ---- a sync that stopped because files changed on both sides, waiting for the user in a dialog
+
+export interface SyncConflict {
+  project: Project;
+  files: string[];
+}
+let conflict: SyncConflict | null = null;
+const conflictListeners = new Set<() => void>();
+export function setSyncConflict(next: SyncConflict | null) {
+  conflict = next;
+  conflictListeners.forEach((l) => l());
+}
+export const peekSyncConflict = () => conflict;
+export function useSyncConflict() {
+  return useSyncExternalStore((cb) => { conflictListeners.add(cb); return () => { conflictListeners.delete(cb); }; }, () => conflict);
+}
+
 // ---- actions on projects
 
 export function useProjectActions() {
@@ -189,9 +206,11 @@ export function useProjectActions() {
     });
   };
 
+  /** True when the copy is up to date afterwards. */
   const sync = async (project: Project) => {
     const path = project.local?.path;
-    if (!path || !server) return;
+    if (!path || !server) return false;
+    let synced = false;
     await run(project.key, "Syncing", async () => {
       let result = await api.lore(["sync"], path, server.id);
 
@@ -223,14 +242,18 @@ export function useProjectActions() {
         const text = (result.stderr || result.stdout).trim();
         const files = conflicts(text);
         if (files.length) {
-          throw new Error(`Syncing stopped: ${files.length} file${files.length === 1 ? " has" : "s have"} changes on this PC that the new version changes as well (${files.slice(0, 2).join(", ")}${files.length > 2 ? ", ..." : ""}). Save your changes as a version first, then sync again.`);
+          // The user chooses per file what happens (SyncConflictDialog); nothing is changed until then.
+          setSyncConflict({ project, files: [...new Set(files)] });
+          return;
         }
         throw new Error(text.split("\n").slice(0, 3).join(" "));
       }
+      synced = true;
       toast(`${project.name} is up to date`, "good");
       invalidateStatus();
       await reload();
     });
+    return synced;
   };
 
   return { busy, openProject, clone, sync, engineFor };
