@@ -1,6 +1,6 @@
 [package]
 name = "lore-desktop"
-version = "0.3.9"
+version = "0.3.10"
 description = "Desktop app for Lore: servers, projects, access and updates"
 authors = ["epicaleric"]
 edition = "2021"
@@ -19,7 +19,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["process", "fs", "time", "io-util", "rt"] }
+tokio = { version = "1", features = ["process", "fs", "time", "io-util", "rt", "sync"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "http2", "stream"] }
 keyring = { version = "3", features = ["windows-native"] }
 base64 = "0.22"

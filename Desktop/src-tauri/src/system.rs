@@ -440,7 +440,93 @@ fn find_plugin_root(dir: &Path, depth: u32) -> Option<PathBuf> {
     None
 }
 
-/// kind = "project" (copy the source into the project) or "engine" (build with RunUAT, install into the engine).
+/// One plugin install at a time: two engines updated at once used to share a work folder and break each other's download.
+static PLUGIN_INSTALL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// A new, empty work folder in the temp folder that no other install uses.
+fn work_folder(prefix: &str) -> Result<PathBuf, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let work = std::env::temp_dir().join(format!("{prefix}-{stamp}-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&work).map_err(|e| format!("Could not make a work folder in {}: {e}", work.display()))?;
+    Ok(work)
+}
+
+/// The zip crate prints every OS error as a bare "i/o error"; this keeps the real cause.
+fn zip_error(error: zip::result::ZipError) -> String {
+    match error {
+        zip::result::ZipError::Io(io) => io.to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Unreal Editors that are running: (exe path, command line), both lower case.
+async fn running_editors() -> Vec<(String, String)> {
+    let script = "Get-CimInstance Win32_Process -Filter \"Name like 'UnrealEditor%'\" | ForEach-Object { \"$($_.ExecutablePath)|$($_.CommandLine)\" }";
+    let output = Command::new("powershell").args(["-NoProfile", "-Command", script]).creation_flags_hidden().output().await;
+    let Ok(output) = output else { return Vec::new() };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split_once('|'))
+        .map(|(exe, args)| (exe.trim().to_lowercase(), args.trim().to_lowercase()))
+        .filter(|(exe, _)| !exe.is_empty())
+        .collect()
+}
+
+/// A message when an Unreal Editor that has this plugin loaded is running, so the install does not even start.
+async fn editor_in_the_way(kind: &str, target: &str) -> Option<String> {
+    let target = target.replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    let editors = running_editors().await;
+    let hit = if kind == "project" {
+        editors.iter().any(|(_, args)| args.replace('/', "\\").contains(&target))
+    } else {
+        editors.iter().any(|(exe, _)| exe.starts_with(&format!("{target}\\")))
+    };
+    hit.then(|| {
+        if kind == "project" {
+            "Unreal Editor has this project open and is using the plugin. Close Unreal Editor, then press Update again.".to_string()
+        } else {
+            "Unreal Editor of this engine is running and is using the plugin. Close Unreal Editor, then press Update again.".to_string()
+        }
+    })
+}
+
+/// The first file in a folder that cannot be opened for writing (in use by another program).
+fn file_in_use(dir: &Path) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = file_in_use(&path) {
+                return Some(found);
+            }
+        } else if std::fs::OpenOptions::new().append(true).open(&path).is_err() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// True when this program may make files in the folder without administrator rights.
+fn writable(dir: &Path) -> bool {
+    let probe = dir.join(".loreplus-write-test");
+    let ok = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
+/// A plain explanation of why replacing the plugin folder failed, naming the file that is in the way.
+fn replace_error(destination: &Path, error: &std::io::Error) -> String {
+    match file_in_use(destination) {
+        Some(file) => format!(
+            "{} is in use, so the plugin in {} could not be replaced. Close Unreal Editor (and anything else using that folder), then press Update again.",
+            file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+            destination.display()
+        ),
+        None => format!("Could not replace the plugin in {} ({error}). Close Unreal Editor, then press Update again.", destination.display()),
+    }
+}
+
 /// Puts a plugin folder in place. The new copy is complete before the old one goes, so a failed copy changes nothing.
 fn replace_folder(from: &Path, to: &Path) -> std::io::Result<()> {
     let parent = to.parent().ok_or(std::io::ErrorKind::NotFound)?;
@@ -472,12 +558,18 @@ async fn replace_folder_elevated(from: &Path, to: &Path) -> Result<(), String> {
     if status.success() { Ok(()) } else { Err("The plugin could not be copied into the engine. Was the permission prompt declined?".into()) }
 }
 
+/// kind = "project" (copy the built plugin into the project) or "engine" (into the engine, built with RunUAT when there is no build).
 #[tauri::command]
 pub async fn install_plugin(app: AppHandle, kind: String, target: String, prebuilt: Option<String>) -> Result<(), String> {
     let task = format!("plugin:{target}");
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-    let work = std::env::temp_dir().join(format!("loreplus-plugin-{stamp}"));
-    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    if let Some(message) = editor_in_the_way(&kind, &target).await {
+        return Err(message);
+    }
+    if PLUGIN_INSTALL.try_lock().is_err() {
+        log(&app, &task, "Waiting for the other plugin install to finish...");
+    }
+    let _one_at_a_time = PLUGIN_INSTALL.lock().await;
+    let work = work_folder("loreplus-plugin")?;
 
     // A project that is opened without C++ tools needs the built plugin, so source code alone is never put in a project.
     if kind == "project" && prebuilt.is_none() {
@@ -490,9 +582,10 @@ pub async fn install_plugin(app: AppHandle, kind: String, target: String, prebui
     log(&app, &task, "Unpacking...");
     let extract_to = work.join("src");
     {
-        let file = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-        archive.extract(&extract_to).map_err(|e| e.to_string())?;
+        let unpack = |e: String| format!("Could not unpack the downloaded plugin ({e}). Press Update to try again.");
+        let file = std::fs::File::open(&zip_path).map_err(|e| unpack(e.to_string()))?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| unpack(zip_error(e)))?;
+        archive.extract(&extract_to).map_err(|e| unpack(zip_error(e)))?;
     }
     let plugin_root = find_plugin_root(&extract_to, 4).ok_or("The plugin was not found in the download")?;
 
@@ -521,8 +614,16 @@ pub async fn install_plugin(app: AppHandle, kind: String, target: String, prebui
         };
         log(&app, &task, format!("Copying into {}", destination.display()));
         let result = match replace_folder(&plugin_root, &destination) {
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied && kind != "project" => replace_folder_elevated(&plugin_root, &destination).await,
-            Err(error) => Err(format!("Could not replace the plugin ({error}). Close Unreal Engine and try again.")),
+            // Only a folder this user may not write to (an engine under Program Files) needs administrator rights;
+            // anywhere else "access denied" means a file is in use, and asking for permission would not help.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    && kind != "project"
+                    && !destination.parent().map(writable).unwrap_or(true) =>
+            {
+                replace_folder_elevated(&plugin_root, &destination).await
+            }
+            Err(error) => Err(replace_error(&destination, &error)),
             Ok(()) => Ok(()),
         };
         let _ = std::fs::remove_dir_all(&work);
@@ -570,10 +671,9 @@ pub async fn install_plugin(app: AppHandle, kind: String, target: String, prebui
         return Err("The build failed. Check that Visual Studio's C++ tools are installed for this engine.".into());
     }
     let destination = engine.join(r"Engine\Plugins\Marketplace\LoreSourceControl");
-    if destination.exists() {
-        std::fs::remove_dir_all(&destination).map_err(|e| e.to_string())?;
-    }
-    copy_dir(&package, &destination).map_err(|e| format!("Could not copy into the engine folder: {e}"))?;
+    let result = replace_folder(&package, &destination).map_err(|e| replace_error(&destination, &e));
+    let _ = std::fs::remove_dir_all(&work);
+    result?;
     log(&app, &task, "Installed into the engine.");
     Ok(())
 }
@@ -795,4 +895,43 @@ pub async fn git_mirror(path: String, remote: String, branch: String, message: S
         return Err(text);
     }
     Ok(if clean { "Nothing new for GitHub.".to_string() } else { "Sent to GitHub.".to_string() })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn work_folders_never_collide() {
+        let a = work_folder("loreplus-test").unwrap();
+        let b = work_folder("loreplus-test").unwrap();
+        assert_ne!(a, b);
+        let _ = std::fs::remove_dir_all(a);
+        let _ = std::fs::remove_dir_all(b);
+    }
+
+    #[test]
+    fn zip_errors_keep_the_cause() {
+        let error = zip::result::ZipError::Io(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "failed to fill whole buffer"));
+        assert_eq!(zip_error(error), "failed to fill whole buffer");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_file_in_use_is_named() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = work_folder("loreplus-test").unwrap();
+        std::fs::create_dir_all(dir.join("Binaries")).unwrap();
+        let dll = dir.join("Binaries").join("UnrealEditor-LoreSourceControl.dll");
+        std::fs::write(&dll, b"x").unwrap();
+        assert!(file_in_use(&dir).is_none());
+        // Like a loaded DLL: open without sharing.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&dll).unwrap();
+        let message = replace_error(&dir, &std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert!(message.starts_with("UnrealEditor-LoreSourceControl.dll is in use"), "{message}");
+        assert!(writable(&dir));
+        drop(held);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
