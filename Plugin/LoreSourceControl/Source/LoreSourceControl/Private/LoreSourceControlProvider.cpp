@@ -44,6 +44,8 @@ static TAutoConsoleVariable<bool> CVarLoreBlockSaveOfLockedFiles(
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Dialog/SCustomDialog.h"
 #include "Framework/Application/SlateApplication.h"
 
@@ -464,7 +466,10 @@ ECommandResult::Type FLoreSourceControlProvider::Execute(const FSourceControlOpe
 		ECommandResult::Type Result = ExecuteSynchronousCommand(*Command, InOperation->GetInProgressString());
 		if (bIsSync && Result != ECommandResult::Succeeded && !LastSyncConflicts.IsEmpty() && !bResolvingSyncConflicts)
 		{
-			Result = ResolveSyncConflicts(InOperation, AbsoluteFiles, MoveTemp(LastSyncConflicts));
+			// A copy: the second sync inside clears LastSyncConflicts.
+			const TArray<FString> Conflicts = MoveTemp(LastSyncConflicts);
+			LastSyncConflicts.Reset();
+			Result = ResolveSyncConflicts(InOperation, AbsoluteFiles, Conflicts);
 		}
 		return Result;
 	}
@@ -731,55 +736,98 @@ ECommandResult::Type FLoreSourceControlProvider::ResolveSyncConflicts(const FSou
 
 	const FString BackupDir = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir()), TEXT("Lore"), TEXT("Conflicts"), FDateTime::Now().ToString(TEXT("%Y.%m.%d-%H.%M.%S")));
 
-	// One line per file, naming who holds its lock where that is known.
-	FString List;
+	// One label per file, naming who holds its lock where that is known.
+	TArray<FString> Labels;
 	for (const FString& Rel : InConflicts)
 	{
-		List += TEXT("    ") + Rel;
+		FString Label = Rel;
 		const FString Abs = FLorePathUtils::ToAbsolutePath(Rel, WorkingCopyRoot);
 		if (const TSharedRef<FLoreSourceControlState, ESPMode::ThreadSafe>* Cached = StateCache.Find(FLorePathUtils::MakeCacheKey(Abs)))
 		{
 			if ((*Cached)->LockState == ELoreLockState::LockedByOther)
 			{
-				List += FString::Printf(TEXT("   (locked by %s)"), *(*Cached)->LockUser);
+				Label += FString::Printf(TEXT("   (locked by %s)"), *(*Cached)->LockUser);
 			}
 		}
-		List += TEXT("\n");
+		Labels.Add(MoveTemp(Label));
 	}
 
 	if (FApp::IsUnattended() || !FSlateApplication::IsInitialized())
 	{
-		UE_LOG(LogLoreSourceControl, Warning, TEXT("Sync stopped on files changed on both sides; nobody to ask, so nothing was changed:\n%s"), *List);
+		UE_LOG(LogLoreSourceControl, Warning, TEXT("Sync stopped on files changed on both sides; nobody to ask, so nothing was changed:\n%s"), *FString::Join(Labels, TEXT("\n")));
 		return ECommandResult::Failed;
 	}
 
-	const FText Message = FText::Format(LOCTEXT("SyncConflictMessage",
-		"Sync stopped before downloading anything. These files were changed on this PC and are also changed in the newer version on the server:\n\n{0}\n"
-		"Take theirs: download the new version. Your version is kept as a copy in\n    {1}\n\n"
-		"Keep mine: download the new version, then put your version back on top of it, so you can submit it. "
-		"Submitting replaces their change to these files, so agree on it with whoever made it. A copy is kept as well.\n\n"
-		"Cancel: change nothing. You can also revert or submit these files yourself and sync again."),
-		FText::FromString(List), FText::FromString(BackupDir));
+	// The choice is per file: a ticked box keeps mine, an empty one takes theirs.
+	const TSharedRef<TArray<bool>> KeepMine = MakeShared<TArray<bool>>();
+	KeepMine->Init(false, InConflicts.Num());
+
+	const TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
+	for (int32 Index = 0; Index < InConflicts.Num(); ++Index)
+	{
+		Rows->AddSlot()
+		.AutoHeight()
+		.Padding(16.0f, 2.0f)
+		[
+			SNew(SCheckBox)
+			.IsChecked_Lambda([KeepMine, Index]() { return (*KeepMine)[Index] ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+			.OnCheckStateChanged_Lambda([KeepMine, Index](ECheckBoxState InState) { (*KeepMine)[Index] = InState == ECheckBoxState::Checked; })
+			[
+				SNew(STextBlock).Text(FText::Format(LOCTEXT("SyncConflictRow", "Keep mine:  {0}"), FText::FromString(Labels[Index])))
+			]
+		];
+	}
+
+	const FText Intro = LOCTEXT("SyncConflictIntro",
+		"Sync stopped before downloading anything. These files were changed on this PC and are also changed in the newer version on the server. "
+		"Choose per file:");
+	const FText Explanation = FText::Format(LOCTEXT("SyncConflictExplain",
+		"Not ticked = take theirs: the file gets the new version.\n"
+		"Ticked = keep mine: the new version is downloaded, then your version goes back on top so you can submit it. "
+		"Submitting replaces their change to that file, so agree on it with whoever made it.\n\n"
+		"Every file you had is copied to {0} first, so nothing is lost.\n"
+		"Cancel changes nothing; you can also revert or submit these files yourself and sync again."),
+		FText::FromString(BackupDir));
 
 	const TSharedRef<SCustomDialog> Dialog = SNew(SCustomDialog)
 		.Title(LOCTEXT("SyncConflictTitle", "Lore: files changed on both sides"))
 		.Content()
 		[
-			SNew(STextBlock)
-			.Text(Message)
-			.WrapTextAt(720.0f)
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
+			[
+				SNew(STextBlock).Text(Intro).WrapTextAt(720.0f)
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				Rows
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock).Text(Explanation).WrapTextAt(720.0f)
+			]
 		]
 		.Buttons({
-			SCustomDialog::FButton(LOCTEXT("SyncConflictTakeTheirs", "Take theirs (keep mine as a copy)")),
-			SCustomDialog::FButton(LOCTEXT("SyncConflictKeepMine", "Keep mine")),
+			SCustomDialog::FButton(LOCTEXT("SyncConflictApply", "Sync with these choices")),
+			SCustomDialog::FButton(LOCTEXT("SyncConflictTakeTheirsAll", "Take theirs for all")),
+			SCustomDialog::FButton(LOCTEXT("SyncConflictKeepMineAll", "Keep mine for all")),
 			SCustomDialog::FButton(LOCTEXT("SyncConflictCancel", "Cancel")),
 		});
 	const int32 Choice = Dialog->ShowModal();
-	const bool bKeepMine = Choice == 1;
-	if (Choice != 0 && !bKeepMine)
+	if (Choice < 0 || Choice > 2)
 	{
 		SourceControlLog.Info(LOCTEXT("SyncConflictCancelled", "Sync cancelled; nothing was changed."));
 		return ECommandResult::Failed;
+	}
+	if (Choice == 1 || Choice == 2)
+	{
+		KeepMine->Init(Choice == 2, InConflicts.Num());
+	}
+	int32 NumKeepMine = 0;
+	for (int32 Index = 0; Index < InConflicts.Num(); ++Index)
+	{
+		NumKeepMine += (*KeepMine)[Index] ? 1 : 0;
+		UE_LOG(LogLoreSourceControl, Log, TEXT("Sync conflict: %s -> %s"), *InConflicts[Index], (*KeepMine)[Index] ? TEXT("keep mine") : TEXT("take theirs"));
 	}
 
 	FScopedSlowTask SlowTask(3.0f, LOCTEXT("SyncConflictResolving", "Resolving the files changed on both sides..."));
@@ -818,7 +866,7 @@ ECommandResult::Type FLoreSourceControlProvider::ResolveSyncConflicts(const FSou
 			}
 		}
 	}
-	UE_LOG(LogLoreSourceControl, Log, TEXT("Sync conflict: copied %d file(s) to %s (%s)"), InConflicts.Num(), *BackupDir, bKeepMine ? TEXT("keep mine") : TEXT("take theirs"));
+	UE_LOG(LogLoreSourceControl, Log, TEXT("Sync conflict: copied %d file(s) to %s (%d keep mine)"), InConflicts.Num(), *BackupDir, NumKeepMine);
 
 	// 2) Let go of files the editor still has open, then drop the local changes so the sync can write.
 	// The editor's Sync Content reloads these packages once the sync returns.
@@ -859,11 +907,14 @@ ECommandResult::Type FLoreSourceControlProvider::ResolveSyncConflicts(const FSou
 		AbsoluteConflicts.Add(FLorePathUtils::ToAbsolutePath(Rel, WorkingCopyRoot));
 	}
 
-	FText Done;
-	if (bKeepMine)
+	TArray<FString> RestoredFiles;
+	for (int32 Index = 0; Index < InConflicts.Num(); ++Index)
 	{
-		TArray<FString> RestoredFiles;
-		for (const FString& Rel : InConflicts)
+		if (!(*KeepMine)[Index])
+		{
+			continue;
+		}
+		const FString& Rel = InConflicts[Index];
 		{
 			const FString Abs = FLorePathUtils::ToAbsolutePath(Rel, WorkingCopyRoot);
 			const FString Backup = FPaths::Combine(BackupDir, Rel);
@@ -885,19 +936,14 @@ ECommandResult::Type FLoreSourceControlProvider::ResolveSyncConflicts(const FSou
 				}
 			}
 		}
-		// Lock them, so nobody else edits them before you submit (reports the holder if someone already does).
-		if (!RestoredFiles.IsEmpty())
-		{
-			Execute(ISourceControlOperation::Create<FCheckOut>(), nullptr, RestoredFiles, EConcurrency::Asynchronous);
-		}
-		Done = FText::Format(LOCTEXT("SyncConflictKeptMine", "Synced. Your version of {0} file(s) is back on top of the new one; submit it to share it. A copy is in {1}."),
-			FText::AsNumber(InConflicts.Num()), FText::FromString(BackupDir));
 	}
-	else
+	// Lock the kept files, so nobody else edits them before you submit (reports the holder if someone already does).
+	if (!RestoredFiles.IsEmpty())
 	{
-		Done = FText::Format(LOCTEXT("SyncConflictTookTheirs", "Synced. {0} file(s) now have the new version; your versions are kept in {1}."),
-			FText::AsNumber(InConflicts.Num()), FText::FromString(BackupDir));
+		Execute(ISourceControlOperation::Create<FCheckOut>(), nullptr, RestoredFiles, EConcurrency::Asynchronous);
 	}
+	const FText Done = FText::Format(LOCTEXT("SyncConflictDone", "Synced. {0} file(s) now have the new version, {1} kept your version on top (submit those to share them). Copies of all your versions are in {2}."),
+		FText::AsNumber(InConflicts.Num() - NumKeepMine), FText::AsNumber(NumKeepMine), FText::FromString(BackupDir));
 
 	Execute(ISourceControlOperation::Create<FUpdateStatus>(), nullptr, AbsoluteConflicts, EConcurrency::Asynchronous);
 	SourceControlLog.Info(Done);

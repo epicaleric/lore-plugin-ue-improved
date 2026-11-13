@@ -98,6 +98,20 @@ public:
 };
 
 /** CheckIn: fail-closed verify, `lore stage`, `lore commit`, `lore push`. */
+/**
+ * Lists the files a sync would change. Without it the editor's Sync Content treats every package under
+ * every content root (engine plugins included) as changed and reloads all of them afterwards, which takes
+ * minutes and can crash the editor.
+ */
+class FLoreSyncPreviewWorker : public ILoreSourceControlWorker
+{
+public:
+	virtual ~FLoreSyncPreviewWorker() = default;
+	virtual FName GetName() const override;
+	virtual bool Execute(FLoreSourceControlCommand& InCommand) override;
+	virtual bool UpdateStates() const override;
+};
+
 class FLoreCheckInWorker : public ILoreSourceControlWorker
 {
 public:

@@ -185,6 +185,7 @@ void FLoreSourceControlModule::RegisterWorkers()
 	LoreProvider.RegisterWorker("Delete", FGetLoreSourceControlWorker::CreateStatic(&CreateWorker<FLoreDeleteWorker>));
 	LoreProvider.RegisterWorker("Revert", FGetLoreSourceControlWorker::CreateStatic(&CreateWorker<FLoreRevertWorker>));
 	LoreProvider.RegisterWorker("Sync", FGetLoreSourceControlWorker::CreateStatic(&CreateWorker<FLoreSyncWorker>));
+	LoreProvider.RegisterWorker("SyncPreview", FGetLoreSourceControlWorker::CreateStatic(&CreateWorker<FLoreSyncPreviewWorker>));
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -605,6 +605,70 @@ bool FLoreSyncWorker::UpdateStates() const
 	return LoreSourceControlUtils::UpdateCachedStates(OutStates);
 }
 
+// ---------------------------------------------------------------------- SyncPreview
+
+FName FLoreSyncPreviewWorker::GetName() const
+{
+	return "SyncPreview";
+}
+
+bool FLoreSyncPreviewWorker::Execute(FLoreSourceControlCommand& InCommand)
+{
+	const LoreSourceControlUtils::FLoreCommandContext Context = LoreSourceControlUtils::MakeContext(InCommand);
+	const TSharedRef<FSyncPreview, ESPMode::ThreadSafe> Operation = StaticCastSharedRef<FSyncPreview>(InCommand.Operation);
+
+	// Where we are and where the sync would go.
+	TArray<FString> StatusLines;
+	int32 StatusReturn = -1;
+	if (!LoreSourceControlUtils::RunCommand(TEXT("status"), TArray<FString>(), TArray<FString>(), Context, StatusLines, InCommand.ErrorMessages, StatusReturn))
+	{
+		return false;
+	}
+	FLoreRepoStatus RepoStatus;
+	TArray<FLoreSourceControlState> IgnoredStates;
+	LoreSourceControlUtils::ParseStatusResults(StatusLines, InCommand.WorkingCopyRoot, RepoStatus, IgnoredStates);
+
+	const FString Target = Operation->GetRevision().IsEmpty() ? RepoStatus.RemoteRevision : Operation->GetRevision();
+	TArray<FString> Affected;
+	if (Target.IsEmpty() || RepoStatus.LocalRevision.IsEmpty() || Target == RepoStatus.LocalRevision)
+	{
+		Operation->SetAffectedFiles(MoveTemp(Affected)); // nothing incoming
+		return true;
+	}
+
+	TArray<FString> DiffLines;
+	int32 DiffReturn = -1;
+	if (!LoreSourceControlUtils::RunCommand(TEXT("revision diff"), { RepoStatus.LocalRevision, TEXT("--target"), FString::Printf(TEXT("\"%s\""), *Target) },
+		TArray<FString>(), Context, DiffLines, InCommand.ErrorMessages, DiffReturn))
+	{
+		return false;
+	}
+	for (const FString& Line : DiffLines)
+	{
+		// "<code> <path>"; directories come without a trailing slash and are simply not packages.
+		const FString Clean = LoreSourceControlUtils::StripAnsi(Line).TrimStartAndEnd();
+		if (Clean.Len() > 2 && Clean[1] == TEXT(' ') && FString(TEXT("MADVC")).Contains(Clean.Left(1), ESearchCase::CaseSensitive))
+		{
+			FString Path = Clean.Mid(2).TrimStartAndEnd();
+			const int32 Arrow = Path.Find(TEXT(" -> "), ESearchCase::CaseSensitive);
+			if (Arrow != INDEX_NONE)
+			{
+				Affected.Add(FLorePathUtils::ToAbsolutePath(Path.Left(Arrow).TrimStartAndEnd(), InCommand.WorkingCopyRoot));
+				Path = Path.Mid(Arrow + 4).TrimStartAndEnd();
+			}
+			Affected.Add(FLorePathUtils::ToAbsolutePath(Path, InCommand.WorkingCopyRoot));
+		}
+	}
+	UE_LOG(LogLoreSourceControl, Log, TEXT("SyncPreview: %d path(s) change between revision %d and %s"), Affected.Num(), RepoStatus.LocalRevisionNumber, *Target);
+	Operation->SetAffectedFiles(MoveTemp(Affected));
+	return true;
+}
+
+bool FLoreSyncPreviewWorker::UpdateStates() const
+{
+	return false;
+}
+
 // -------------------------------------------------------------------------- CheckIn
 
 FName FLoreCheckInWorker::GetName() const
