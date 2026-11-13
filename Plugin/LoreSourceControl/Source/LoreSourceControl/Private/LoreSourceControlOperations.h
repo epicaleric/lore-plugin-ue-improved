@@ -92,6 +92,9 @@ public:
 
 public:
 	TArray<FLoreSourceControlState> OutStates;
+
+	/** Workspace-relative files the sync refused to overwrite because they were also changed on this PC. */
+	TArray<FString> Conflicts;
 };
 
 /** CheckIn: fail-closed verify, `lore stage`, `lore commit`, `lore push`. */

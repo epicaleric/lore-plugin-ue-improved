@@ -360,12 +360,26 @@ bool FLoreCheckOutWorker::Execute(FLoreSourceControlCommand& InCommand)
 		Results, InCommand.ErrorMessages);
 	UE_LOG(LogLoreSourceControl, Log, TEXT("CheckOut: lock acquire %s"), bOk ? TEXT("succeeded") : TEXT("FAILED"));
 
+	RefreshFileStates(InCommand, /*bScan=*/false, /*bWithHistory=*/false, OutStates, nullptr);
+
 	if (!bOk)
 	{
-		InCommand.ErrorMessages.Add(TEXT("Failed to acquire one or more locks (a file may be locked by another user)."));
+		// Say who holds each lock, so the editor's "could not be checked out" is not a dead end.
+		bool bNamedOwner = false;
+		for (const FLoreSourceControlState& State : OutStates)
+		{
+			if (State.LockState == ELoreLockState::LockedByOther)
+			{
+				InCommand.ErrorMessages.Add(FString::Printf(TEXT("Cannot check out '%s': %s holds its lock in Lore. Ask %s to submit and release it, then sync before you change it."),
+					*State.DepotFilename, *State.LockUser, *State.LockUser));
+				bNamedOwner = true;
+			}
+		}
+		if (!bNamedOwner)
+		{
+			InCommand.ErrorMessages.Add(TEXT("Failed to acquire one or more locks (a file may be locked by another user)."));
+		}
 	}
-
-	RefreshFileStates(InCommand, /*bScan=*/false, /*bWithHistory=*/false, OutStates, nullptr);
 	return bOk;
 }
 
@@ -486,9 +500,97 @@ bool FLoreSyncWorker::Execute(FLoreSourceControlCommand& InCommand)
 {
 	const LoreSourceControlUtils::FLoreCommandContext Context = LoreSourceControlUtils::MakeContext(InCommand);
 
+	TArray<FString> Params;
+	if (InCommand.Operation->GetName() == "Sync")
+	{
+		const TSharedRef<FSync, ESPMode::ThreadSafe> Operation = StaticCastSharedRef<FSync>(InCommand.Operation);
+		if (!Operation->GetRevision().IsEmpty())
+		{
+			Params.Add(FString::Printf(TEXT("\"%s\""), *Operation->GetRevision()));
+		}
+	}
+
 	TArray<FString> Results;
+	TArray<FString> Errors;
 	int32 ReturnCode = -1;
-	const bool bOk = LoreSourceControlUtils::RunCommand(TEXT("sync"), TArray<FString>(), TArray<FString>(), Context, Results, InCommand.ErrorMessages, ReturnCode);
+	bool bOk = LoreSourceControlUtils::RunCommand(TEXT("sync"), Params, TArray<FString>(), Context, Results, Errors, ReturnCode);
+
+	// Lore does not sync while files are staged for the next commit (for example after a submit that
+	// stopped halfway). Set them back to unstaged for the sync and stage them again afterwards, as
+	// Lore+ does; nothing in the files changes.
+	auto Mentions = [&Results, &Errors](const TCHAR* InText)
+	{
+		for (const TArray<FString>* Lines : { &Results, &Errors })
+		{
+			for (const FString& Line : *Lines)
+			{
+				if (Line.Contains(InText, ESearchCase::IgnoreCase))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+	if (!bOk && Mentions(TEXT("staged state")))
+	{
+		TArray<FString> StatusLines;
+		TArray<FString> StatusErrors;
+		int32 StatusReturn = -1;
+		LoreSourceControlUtils::RunCommand(TEXT("status"), TArray<FString>(), TArray<FString>(), Context, StatusLines, StatusErrors, StatusReturn);
+		const TArray<FString> Staged = LoreSourceControlUtils::ParseStagedFiles(StatusLines);
+
+		TArray<FString> UnstageLines;
+		int32 UnstageReturn = -1;
+		if (LoreSourceControlUtils::RunCommand(TEXT("unstage"), TArray<FString>(), { TEXT(".") }, Context, UnstageLines, Errors, UnstageReturn))
+		{
+			UE_LOG(LogLoreSourceControl, Log, TEXT("Sync: unstaged %d staged file(s) to sync, staging them again afterwards"), Staged.Num());
+			Results.Reset();
+			Errors.Reset();
+			bOk = LoreSourceControlUtils::RunCommand(TEXT("sync"), Params, TArray<FString>(), Context, Results, Errors, ReturnCode);
+
+			TArray<FString> StageLines;
+			TArray<FString> StageErrors;
+			if (!Staged.IsEmpty() && !LoreSourceControlUtils::RunCommandBatched(TEXT("stage"), TArray<FString>(), Staged, Context, /*bUseTargetsFile=*/true, StageLines, StageErrors))
+			{
+				Errors.Add(FString::Printf(TEXT("Could not stage these files again: %s"), *FString::Join(Staged, TEXT(", "))));
+			}
+		}
+	}
+
+	if (!bOk)
+	{
+		TArray<FString> AllLines = Results;
+		AllLines.Append(Errors);
+		Conflicts = LoreSourceControlUtils::ParseSyncConflicts(AllLines);
+		if (!Conflicts.IsEmpty())
+		{
+			// Lead with what happened and what to do; Lore's own lines follow for detail.
+			InCommand.ErrorMessages.Add(FString::Printf(
+				TEXT("Sync stopped, nothing was downloaded: %d file(s) changed on this PC are also changed in the newer version on the server: %s. ")
+				TEXT("Choose \"Take theirs\" (your version is kept as a copy in Saved/Lore/Conflicts) or \"Keep mine\" in the dialog, or revert or submit these files and sync again."),
+				Conflicts.Num(), *FString::Join(Conflicts, TEXT(", "))));
+		}
+		UE_LOG(LogLoreSourceControl, Warning, TEXT("Sync failed (exit %d): %s"), ReturnCode, *FString::Join(Errors.IsEmpty() ? Results : Errors, TEXT(" | ")));
+	}
+	else
+	{
+		InCommand.InfoMessages.Add(TEXT("Synced with Lore."));
+	}
+	InCommand.ErrorMessages.Append(Errors);
+	if (!bOk && Errors.IsEmpty())
+	{
+		// Lore writes some refusals to stdout; without them the editor would only say "failed".
+		for (const FString& Line : Results)
+		{
+			const FString Clean = Line.TrimStartAndEnd();
+			if (Clean.StartsWith(TEXT("[Error]")))
+			{
+				InCommand.ErrorMessages.Add(Clean);
+			}
+		}
+	}
+	InCommand.ReturnCode = ReturnCode;
 
 	RefreshFileStates(InCommand, /*bScan=*/true, /*bWithHistory=*/false, OutStates, nullptr);
 	return bOk;
@@ -496,6 +598,10 @@ bool FLoreSyncWorker::Execute(FLoreSourceControlCommand& InCommand)
 
 bool FLoreSyncWorker::UpdateStates() const
 {
+	if (FLoreSourceControlModule* Module = FLoreSourceControlModule::GetPtr())
+	{
+		Module->GetProvider().SetLastSyncConflicts(Conflicts);
+	}
 	return LoreSourceControlUtils::UpdateCachedStates(OutStates);
 }
 

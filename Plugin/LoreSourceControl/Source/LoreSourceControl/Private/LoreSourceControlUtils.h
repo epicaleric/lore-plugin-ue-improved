@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "LoreTypes.h"
 #include "Templates/SharedPointer.h"
+#include "Templates/Atomic.h"
 
 class FLoreSourceControlState;
 class FLoreSourceControlRevision;
@@ -24,6 +25,12 @@ namespace LoreSourceControlUtils
 
 		/** Force `--offline`. */
 		bool bOffline = false;
+
+		/** When set to true from another thread, a running command is stopped (its process is killed). */
+		const TAtomic<bool>* CancelFlag = nullptr;
+
+		/** When above zero, replaces the command's usual time limit (for calls made while the editor waits). */
+		double TimeoutSeconds = 0.0;
 	};
 
 	/**
@@ -42,7 +49,8 @@ namespace LoreSourceControlUtils
 	FLoreCommandContext MakeContext(const FLoreSourceControlCommand& InCommand);
 
 	/**
-	 * Run a single `lore` invocation.
+	 * Run a single `lore` invocation. It never waits for input (`--non-interactive`, no stdin) and is
+	 * stopped when it runs longer than its command's time limit or when the context's CancelFlag is set.
 	 * @param InCommand     The subcommand, possibly multi-word (e.g. "file write").
 	 * @param InParameters  Extra flags/arguments, pre-quoted as needed.
 	 * @param InFiles       Absolute file paths (quoted automatically).
@@ -71,6 +79,15 @@ namespace LoreSourceControlUtils
 
 	/** Remove ANSI/VT escape sequences from a line. */
 	FString StripAnsi(const FString& InLine);
+
+	/**
+	 * Workspace-relative paths `lore sync` refused to overwrite because they were also changed on this PC
+	 * ("File has local changes: <path> (incoming ...)" and the deleted-file variants).
+	 */
+	TArray<FString> ParseSyncConflicts(const TArray<FString>& InLines);
+
+	/** Workspace-relative paths in the "Changes staged for commit" section of `lore status` output. */
+	TArray<FString> ParseStagedFiles(const TArray<FString>& InLines);
 
 	/** Parse `lore status [--scan]` output into a repo header and per-file states. */
 	bool ParseStatusResults(

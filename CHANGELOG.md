@@ -2,6 +2,13 @@
 
 All notable changes. The plugin and the app are versioned separately: the plugin by `VersionName` in `LoreSourceControl.uplugin`, the app by the `desktop-v` tags.
 
+## Plugin 0.3.5
+
+- Sync from the editor can no longer hang: `lore` runs with `--non-interactive` and no input, every call has a time limit, and the progress window has a Cancel button.
+- When a sync stops because files were changed on this PC and on the server, the editor names the files (and who holds their locks) and offers "Take theirs" (your version is kept as a copy in `Saved/Lore/Conflicts`) or "Keep mine" (your version goes back on top so you can submit it). Files the editor has open are let go of first.
+- Assets locked by another user cannot be saved: the editor refuses the save and says who holds the lock (`Lore.BlockSaveOfLockedFiles 0` turns this off). A failed checkout names the lock holder.
+- Sync works while files are staged, and the Lore window's Sync Latest uses the editor's Sync Content.
+
 ## Lore+ 0.2.0
 
 - Finds the newest version correctly (GitHub does not list releases by version), and keeps checking while the app is open.

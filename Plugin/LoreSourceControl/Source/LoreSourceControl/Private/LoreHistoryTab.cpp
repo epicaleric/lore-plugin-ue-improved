@@ -38,6 +38,7 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopedSlowTask.h"
 #include "SourceControlOperations.h"
+#include "SourceControlWindows.h"
 #include "Styling/AppStyle.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
@@ -1178,6 +1179,21 @@ namespace
 
 	bool SyncToLatest(FString& OutError)
 	{
+		// The editor's Sync Content saves first, lets go of open files, offers the take-theirs / keep-mine
+		// choice when a file changed on both sides, and reloads what changed. Use it whenever Lore is active.
+		if (ISourceControlModule::Get().IsEnabled() && ISourceControlModule::Get().GetProvider().GetName() == FName(TEXT("Lore")))
+		{
+			if (FSourceControlWindows::SyncLatest())
+			{
+				return true;
+			}
+			OutError = TEXT("See the Revision Control message log for what stopped it.");
+			return false;
+		}
+
+		FScopedSlowTask SlowTask(1.0f, LOCTEXT("Syncing", "Syncing with Lore..."));
+		SlowTask.MakeDialog();
+		SlowTask.EnterProgressFrame(1.0f);
 		const FContext Context = LoreSourceControlUtils::GetCommandContextFromModule();
 		TArray<FString> Lines;
 		if (!RunLore(Context, TEXT("sync"), TArray<FString>(), TArray<FString>(), Lines, OutError))
@@ -1811,15 +1827,9 @@ private:
 			return FReply::Handled();
 		}
 		FString Error;
-		bool bOk = false;
-		{
-			FScopedSlowTask SlowTask(1.0f, LOCTEXT("Syncing", "Syncing with Lore..."));
-			SlowTask.MakeDialog();
-			SlowTask.EnterProgressFrame(1.0f);
-			bOk = SyncToLatest(Error);
-		}
+		const bool bOk = SyncToLatest(Error);
 		Notify(bOk
-			? LOCTEXT("SyncDone", "Done. Your project is up to date. Reload the level (or restart the editor) so changed assets are read again.")
+			? LOCTEXT("SyncDone", "Done. Your project is up to date.")
 			: FText::Format(LOCTEXT("SyncFailed", "Sync did not work:\n{0}"), FText::FromString(Error)));
 		Reload();
 		return FReply::Handled();

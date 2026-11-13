@@ -27,6 +27,8 @@ public class LoreSourceControl : ModuleRules
 			"HTTP",
 			"Json",
 			"ToolMenus",
+			"ToolWidgets",
+			"SourceControlWindows",
 			"WorkspaceMenuStructure"
 		});
 

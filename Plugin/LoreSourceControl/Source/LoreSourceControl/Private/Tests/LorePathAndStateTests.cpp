@@ -127,6 +127,42 @@ bool FLoreLockParseTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FLoreSyncConflictParseTest,
+	"Lore.SourceControl.Parsers.SyncConflicts",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FLoreSyncConflictParseTest::RunTest(const FString& Parameters)
+{
+	// Output of `lore sync` 0.13 when a file was changed on both sides.
+	TArray<FString> Lines;
+	Lines.Add(TEXT("Synchronizing to local revision 2 -> 604b5c17d789"));
+	Lines.Add(TEXT("[Error] File has local changes: Content/My Folder/BP_Thing.uasset (incoming size 4 bytes, file system size 5 bytes)"));
+	Lines.Add(TEXT("[Error] Deleted file is currently modified in file system: Content/Gone.uasset"));
+	Lines.Add(TEXT("[Error] Local modifications prevent synchronization"));
+
+	const TArray<FString> Conflicts = LoreSourceControlUtils::ParseSyncConflicts(Lines);
+	TestEqual(TEXT("Two conflicts parsed"), Conflicts.Num(), 2);
+	if (Conflicts.Num() == 2)
+	{
+		TestEqual(TEXT("Path with spaces kept, size note cut"), Conflicts[0], FString(TEXT("Content/My Folder/BP_Thing.uasset")));
+		TestEqual(TEXT("Deleted-upstream file"), Conflicts[1], FString(TEXT("Content/Gone.uasset")));
+	}
+
+	TArray<FString> Status;
+	Status.Add(TEXT("Changes staged for commit:"));
+	Status.Add(TEXT("  M Content/A.uasset"));
+	Status.Add(TEXT("Changes not staged for commit:"));
+	Status.Add(TEXT("  M Content/B.uasset"));
+	const TArray<FString> Staged = LoreSourceControlUtils::ParseStagedFiles(Status);
+	TestEqual(TEXT("Only the staged section is read"), Staged.Num(), 1);
+	if (Staged.Num() == 1)
+	{
+		TestEqual(TEXT("Staged path"), Staged[0], FString(TEXT("Content/A.uasset")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FLoreHistoryParseTest,
 	"Lore.SourceControl.Parsers.History",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -195,6 +231,7 @@ bool FLoreStateTransitionTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Lock owner reported"), Owner, FString(TEXT("OtherUser")));
 		TestFalse(TEXT("Cannot checkout when locked by other"), State.CanCheckout());
 		TestFalse(TEXT("Cannot check in when locked by other"), State.CanCheckIn());
+		TestFalse(TEXT("Cannot edit when locked by other, even when modified"), State.CanEdit());
 	}
 
 	// Out of date -> cannot submit even when locked by me.

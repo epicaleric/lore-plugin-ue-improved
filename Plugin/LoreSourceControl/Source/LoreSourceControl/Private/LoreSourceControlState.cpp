@@ -250,7 +250,11 @@ bool FLoreSourceControlState::CanEdit() const
 {
 	// We can edit when we hold the lock, or when the file already has a pending
 	// add/modify (locking binary assets is the recommended workflow but text
-	// edits don't strictly require a lock).
+	// edits don't strictly require a lock). Never while someone else holds the lock.
+	if (LockState == ELoreLockState::LockedByOther)
+	{
+		return false;
+	}
 	return LockState == ELoreLockState::LockedByMe
 		|| WorkingState == ELoreWorkingState::Added
 		|| WorkingState == ELoreWorkingState::Modified;

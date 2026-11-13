@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "ISourceControlProvider.h"
 #include "Misc/IQueuedWork.h"
+#include "Templates/Atomic.h"
 
 class ISourceControlOperation;
 class ILoreSourceControlWorker;
@@ -45,6 +46,9 @@ public:
 
 	/** Completion delegate. */
 	FSourceControlOperationComplete OperationCompleteDelegate;
+
+	/** Set from the game thread when the user cancels; the running `lore` process is then killed. */
+	TAtomic<bool> bCancelRequested { false };
 
 	/** Set to 1 once the worker thread has finished Execute(). */
 	volatile int32 bExecuteProcessed = 0;

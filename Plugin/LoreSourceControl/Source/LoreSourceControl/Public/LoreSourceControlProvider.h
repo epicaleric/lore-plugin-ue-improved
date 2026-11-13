@@ -83,6 +83,9 @@ public:
 	/** Remove a file from the state cache. */
 	bool RemoveFileFromCache(const FString& Filename);
 
+	/** Files the last sync refused to overwrite (workspace-relative); set by the sync worker on the game thread. */
+	void SetLastSyncConflicts(const TArray<FString>& InConflicts) { LastSyncConflicts = InConflicts; }
+
 	/** Register a worker factory for an operation name. */
 	void RegisterWorker(const FName& InName, const FGetLoreSourceControlWorker& InDelegate);
 
@@ -97,6 +100,24 @@ private:
 
 	/** Run a command synchronously, pumping Tick() until it completes. */
 	ECommandResult::Type ExecuteSynchronousCommand(FLoreSourceControlCommand& InCommand, const FText& Task);
+
+	/**
+	 * After a sync that stopped because files changed here are also changed on the server: ask the user to
+	 * take theirs or keep mine (a copy of theirs-replaced files always goes to Saved/Lore/Conflicts), then
+	 * reset those files and sync again. Game thread only.
+	 */
+	ECommandResult::Type ResolveSyncConflicts(const FSourceControlOperationRef& InOperation, const TArray<FString>& InFiles, const TArray<FString>& InConflicts);
+
+	/**
+	 * Refuse to save a file another user holds the Lore lock on. Wraps the editor's own
+	 * IsPackageOKToSave check, which SavePackage asks before writing anything.
+	 */
+	void InstallSaveGuard();
+	void RemoveSaveGuard();
+	bool HandleIsPackageOKToSave(UPackage* InPackage, const FString& InFilename, FOutputDevice* InError);
+
+	/** True when someone else holds the Lore lock on this absolute path (fresh lock list, cached for a few seconds). */
+	bool IsLockedByOtherUser(const FString& InAbsoluteFilename, FString& OutOwner);
 
 	/** Queue a command for synchronous or asynchronous execution. */
 	ECommandResult::Type IssueCommand(FLoreSourceControlCommand& InCommand, bool bSynchronous);
@@ -133,4 +154,18 @@ private:
 
 	/** Handle for the PackageSavedWithContextEvent subscription. */
 	FDelegateHandle OnPackageSavedHandle;
+
+	/** Conflicts reported by the last sync, and whether they are being resolved now (no nested dialogs). */
+	TArray<FString> LastSyncConflicts;
+	bool bResolvingSyncConflicts = false;
+
+	/** The IsPackageOKToSave check that was bound before the save guard (the editor's own), called through. */
+	TDelegate<bool(UPackage*, const FString&, FOutputDevice*)> PreviousIsPackageOKToSave;
+	bool bSaveGuardInstalled = false;
+	FDelegateHandle PostEngineInitHandle;
+
+	/** Lock list the save guard checks against, and when it was read. */
+	TArray<FLoreLockInfo> SaveGuardLocks;
+	double SaveGuardLocksTime = -1.0;
+	bool bSaveGuardLocksValid = false;
 };

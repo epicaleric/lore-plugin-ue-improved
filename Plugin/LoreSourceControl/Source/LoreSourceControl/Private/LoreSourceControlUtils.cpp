@@ -130,6 +130,37 @@ namespace
 		return false;
 	}
 
+	/**
+	 * How long one `lore` call may run before it is stopped. Transfers can take long on a big project,
+	 * queries never should; the limit only exists so a stuck process cannot freeze the editor forever.
+	 */
+	double GetCommandTimeoutSeconds(const FString& InCommand)
+	{
+		static const TCHAR* const Transfers[] = { TEXT("sync"), TEXT("push"), TEXT("commit"), TEXT("stage"), TEXT("clone"), TEXT("revision") };
+		for (const TCHAR* Transfer : Transfers)
+		{
+			if (InCommand.StartsWith(Transfer))
+			{
+				return 60.0 * 60.0;
+			}
+		}
+		if (InCommand.StartsWith(TEXT("lock")) || InCommand.StartsWith(TEXT("auth")))
+		{
+			return 2.0 * 60.0;
+		}
+		return 10.0 * 60.0;
+	}
+
+	FString BytesToString(const TArray<uint8>& InBytes)
+	{
+		if (InBytes.IsEmpty())
+		{
+			return FString();
+		}
+		const FUTF8ToTCHAR Converted(reinterpret_cast<const ANSICHAR*>(InBytes.GetData()), InBytes.Num());
+		return FString(Converted.Length(), Converted.Get());
+	}
+
 	bool LineStartsWithKey(const FString& InTrimmed, const TCHAR* InKey, FString& OutValue)
 	{
 		// Key lines look like "Revision  : <value>"; match on the word before ':'.
@@ -279,6 +310,7 @@ FLoreCommandContext MakeContext(const FLoreSourceControlCommand& InCommand)
 	Context.BinaryPath = InCommand.LoreBinaryPath;
 	Context.WorkingCopyRoot = InCommand.WorkingCopyRoot;
 	Context.UserName = InCommand.UserName;
+	Context.CancelFlag = &InCommand.bCancelRequested;
 	return Context;
 }
 
@@ -312,8 +344,14 @@ bool RunCommand(
 		FullCommand += FString::Printf(TEXT(" \"%s\""), *File);
 	}
 
-	// Global flags: never paginate, root at the working copy, pin identity.
-	FullCommand += TEXT(" --no-pager");
+	// Transfers are much quicker over several connections (Lore+ does the same).
+	if (InCommand == TEXT("sync") || InCommand == TEXT("push"))
+	{
+		FullCommand += TEXT(" --max-connections 8");
+	}
+
+	// Global flags: never paginate, never wait for an answer, root at the working copy, pin identity.
+	FullCommand += TEXT(" --no-pager --non-interactive");
 	if (!InContext.WorkingCopyRoot.IsEmpty())
 	{
 		FullCommand += FString::Printf(TEXT(" --repository \"%s\""), *InContext.WorkingCopyRoot);
@@ -329,15 +367,94 @@ bool RunCommand(
 
 	UE_LOG(LogLoreSourceControl, Verbose, TEXT("Running: lore %s"), *FullCommand);
 
-	FString StdOut;
-	FString StdErr;
-	const TCHAR* WorkingDir = InContext.WorkingCopyRoot.IsEmpty() ? nullptr : *InContext.WorkingCopyRoot;
-	const bool bLaunched = FPlatformProcess::ExecProcess(*InContext.BinaryPath, *FullCommand, &OutReturnCode, &StdOut, &StdErr, WorkingDir);
-
-	if (!bLaunched)
+	// Launched by hand rather than with ExecProcess: that passes the editor's own stdin on and waits without
+	// limit, so a `lore` that stops for any reason freezes the editor's progress window for good. Here the
+	// child gets no stdin, and it is killed when it runs too long or the user cancels.
+	void* StdOutRead = nullptr;
+	void* StdOutWrite = nullptr;
+	void* StdErrRead = nullptr;
+	void* StdErrWrite = nullptr;
+	if (!FPlatformProcess::CreatePipe(StdOutRead, StdOutWrite) || !FPlatformProcess::CreatePipe(StdErrRead, StdErrWrite))
 	{
+		FPlatformProcess::ClosePipe(StdOutRead, StdOutWrite);
+		FPlatformProcess::ClosePipe(StdErrRead, StdErrWrite);
+		OutErrorMessages.Add(TEXT("Failed to create pipes for `lore`."));
+		return false;
+	}
+
+	const TCHAR* WorkingDir = InContext.WorkingCopyRoot.IsEmpty() ? nullptr : *InContext.WorkingCopyRoot;
+	FProcHandle Process = FPlatformProcess::CreateProc(*InContext.BinaryPath, *FullCommand, /*bLaunchDetached=*/false,
+		/*bLaunchHidden=*/true, /*bLaunchReallyHidden=*/true, /*OutProcessID=*/nullptr, /*PriorityModifier=*/0, WorkingDir,
+		/*PipeWriteChild=*/StdOutWrite, /*PipeReadChild=*/nullptr, /*PipeStdErrChild=*/StdErrWrite);
+	if (!Process.IsValid())
+	{
+		FPlatformProcess::ClosePipe(StdOutRead, StdOutWrite);
+		FPlatformProcess::ClosePipe(StdErrRead, StdErrWrite);
 		OutErrorMessages.Add(FString::Printf(TEXT("Failed to launch `lore` at %s"), *InContext.BinaryPath));
 		return false;
+	}
+
+	TArray<uint8> OutBytes;
+	TArray<uint8> ErrBytes;
+	auto DrainPipes = [&]()
+	{
+		TArray<uint8> Chunk;
+		if (FPlatformProcess::ReadPipeToArray(StdOutRead, Chunk))
+		{
+			OutBytes.Append(Chunk);
+		}
+		Chunk.Reset();
+		if (FPlatformProcess::ReadPipeToArray(StdErrRead, Chunk))
+		{
+			ErrBytes.Append(Chunk);
+		}
+	};
+
+	const double TimeoutSeconds = InContext.TimeoutSeconds > 0.0 ? InContext.TimeoutSeconds : GetCommandTimeoutSeconds(InCommand);
+	const double StartSeconds = FPlatformTime::Seconds();
+	bool bTimedOut = false;
+	bool bCancelled = false;
+	while (FPlatformProcess::IsProcRunning(Process))
+	{
+		DrainPipes();
+		if (InContext.CancelFlag != nullptr && InContext.CancelFlag->Load())
+		{
+			bCancelled = true;
+			break;
+		}
+		if (FPlatformTime::Seconds() - StartSeconds > TimeoutSeconds)
+		{
+			bTimedOut = true;
+			break;
+		}
+		FPlatformProcess::Sleep(0.01f);
+	}
+
+	if (bTimedOut || bCancelled)
+	{
+		FPlatformProcess::TerminateProc(Process, /*KillTree=*/true);
+		FPlatformProcess::WaitForProc(Process);
+	}
+	DrainPipes();
+	if (!FPlatformProcess::GetProcReturnCode(Process, &OutReturnCode))
+	{
+		OutReturnCode = -1;
+	}
+	FPlatformProcess::CloseProc(Process);
+	FPlatformProcess::ClosePipe(StdOutRead, StdOutWrite);
+	FPlatformProcess::ClosePipe(StdErrRead, StdErrWrite);
+
+	const FString StdOut = BytesToString(OutBytes);
+	const FString StdErr = BytesToString(ErrBytes);
+
+	if (bTimedOut || bCancelled)
+	{
+		OutReturnCode = -1;
+		const FString Reason = bCancelled
+			? FString::Printf(TEXT("`lore %s` was cancelled."), *InCommand)
+			: FString::Printf(TEXT("`lore %s` did not finish within %d minutes and was stopped."), *InCommand, static_cast<int32>(TimeoutSeconds / 60.0 + 0.5));
+		UE_LOG(LogLoreSourceControl, Warning, TEXT("%s"), *Reason);
+		OutErrorMessages.Add(Reason);
 	}
 
 	{
@@ -426,6 +543,78 @@ bool RunCommandBatched(
 		bAllSucceeded &= RunCommand(InCommand, InParameters, Batch, InContext, OutResults, OutErrorMessages, ReturnCode);
 	}
 	return bAllSucceeded;
+}
+
+TArray<FString> ParseSyncConflicts(const TArray<FString>& InLines)
+{
+	// "[Error] File has local changes: <path> (incoming size 4 bytes, file system size 5 bytes)"
+	// "[Error] Deleted file is currently modified in file system: <path>"
+	// "[Error] Deleted directory has modified files in file system: <path>"
+	static const TCHAR* const ChangedMarker = TEXT("File has local changes:");
+	static const TCHAR* const DeletedMarkers[] = {
+		TEXT("Deleted file is currently modified in file system:"),
+		TEXT("Deleted directory has modified files in file system:"),
+	};
+
+	TArray<FString> Conflicts;
+	for (const FString& Raw : InLines)
+	{
+		const FString Line = StripAnsi(Raw).TrimStartAndEnd();
+		FString Path;
+
+		const int32 ChangedIdx = Line.Find(ChangedMarker, ESearchCase::CaseSensitive);
+		if (ChangedIdx != INDEX_NONE)
+		{
+			Path = Line.Mid(ChangedIdx + FCString::Strlen(ChangedMarker));
+			const int32 IncomingIdx = Path.Find(TEXT(" (incoming"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			if (IncomingIdx != INDEX_NONE)
+			{
+				Path = Path.Left(IncomingIdx);
+			}
+		}
+		else
+		{
+			for (const TCHAR* Marker : DeletedMarkers)
+			{
+				const int32 Idx = Line.Find(Marker, ESearchCase::CaseSensitive);
+				if (Idx != INDEX_NONE)
+				{
+					Path = Line.Mid(Idx + FCString::Strlen(Marker));
+					break;
+				}
+			}
+		}
+
+		Path = Path.TrimStartAndEnd();
+		Path.ReplaceInline(TEXT("\\"), TEXT("/"));
+		if (!Path.IsEmpty())
+		{
+			Conflicts.AddUnique(Path);
+		}
+	}
+	return Conflicts;
+}
+
+TArray<FString> ParseStagedFiles(const TArray<FString>& InLines)
+{
+	TArray<FString> Staged;
+	bool bInStaged = false;
+	for (const FString& Raw : InLines)
+	{
+		const FString Trimmed = StripAnsi(Raw).TrimStartAndEnd();
+		if (Trimmed.StartsWith(TEXT("Changes ")) || Trimmed.StartsWith(TEXT("Untracked files")) || Trimmed.StartsWith(TEXT("Tracked changes")))
+		{
+			bInStaged = Trimmed.StartsWith(TEXT("Changes staged for commit"));
+			continue;
+		}
+		FString Code;
+		FString Path;
+		if (bInStaged && ParseFileLine(Trimmed, Code, Path))
+		{
+			Staged.Add(Path);
+		}
+	}
+	return Staged;
 }
 
 bool ParseStatusResults(
